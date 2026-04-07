@@ -1,47 +1,49 @@
-# Qwen Claude Code Learning Project
+# Yuloo
 
-This repository is a learning-oriented reimplementation of
+[中文说明](README.zh-CN.md)
+
+Yuloo is a small learning project inspired by
 [shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code),
 adapted to run on Qwen models through DashScope's OpenAI-compatible API.
 
-## What This Project Is
+## What It Does
 
-The project follows the original step-by-step teaching style:
+The repository follows a step-by-step agent-building path:
 
-- `s01_agent_loop.py`: the minimal agent loop
-- `s02_tool_use.py`: tool calling for file and shell operations
-- `s03_todo_write.py`: explicit planning with a todo tool and progress tracking
+- `s01_agent_loop.py`: minimal agent loop
+- `s02_tool_use.py`: tool calling for shell and file operations
+- `s03_todo_write.py`: todo-driven planning and progress tracking
 
-The current CLI entrypoint in [main.py](/e:/Project/TEst1/main.py) is wired to
-the `s03` flow.
+The current CLI entrypoint in [main.py](/e:/Project/TEst1/main.py) uses the
+`s03` flow.
 
 ## Current Status
 
-Completed:
+Implemented so far:
 
-- `s01`: basic agent loop
+- `s01`: basic loop
 - `s02`: tool use
-- `s03`: todo-driven planning and progress updates
+- `s03`: explicit planning with a `todo` tool
 
-Current `s03` improvements include:
+Current `s03` behavior includes:
 
 - a dedicated `todo` tool in [tools.py](/e:/Project/TEst1/tools.py)
 - explicit planning instructions before multi-step work
-- reminder injection when the agent has not updated todos for several tool rounds
-- todo-specific terminal output in [terminal.py](/e:/Project/TEst1/terminal.py)
-- more structured session logging in [log.py](/e:/Project/TEst1/log.py)
+- reminder injection when todos have not been updated for several tool rounds
+- todo-specific terminal rendering in [terminal.py](/e:/Project/TEst1/terminal.py)
+- structured JSONL session logging in [log.py](/e:/Project/TEst1/log.py)
 
 ## Project Structure
 
 - [main.py](/e:/Project/TEst1/main.py): CLI entrypoint
 - [s01_agent_loop.py](/e:/Project/TEst1/s01_agent_loop.py): baseline loop
-- [s02_tool_use.py](/e:/Project/TEst1/s02_tool_use.py): tool use step
-- [s03_todo_write.py](/e:/Project/TEst1/s03_todo_write.py): todo planning step
+- [s02_tool_use.py](/e:/Project/TEst1/s02_tool_use.py): tool use stage
+- [s03_todo_write.py](/e:/Project/TEst1/s03_todo_write.py): todo planning stage
 - [tools.py](/e:/Project/TEst1/tools.py): tool registry and handlers
-- [terminal.py](/e:/Project/TEst1/terminal.py): terminal rendering helpers
-- [log.py](/e:/Project/TEst1/log.py): JSONL session logging
+- [terminal.py](/e:/Project/TEst1/terminal.py): terminal output helpers
+- [log.py](/e:/Project/TEst1/log.py): session logging
 - [utils.py](/e:/Project/TEst1/utils.py): workspace path safety
-- [tests/test_s03_todo_write.py](/e:/Project/TEst1/tests/test_s03_todo_write.py): regression tests for the todo workflow
+- [tests/test_s03_todo_write.py](/e:/Project/TEst1/tests/test_s03_todo_write.py): regression tests for the todo flow
 
 ## Built-in Tools
 
@@ -60,9 +62,9 @@ Current `s03` improvements include:
 - File operations go through `safe_path()` in [utils.py](/e:/Project/TEst1/utils.py)
   to prevent escaping the workspace.
 - Shell commands time out after 120 seconds.
-- Tool output is truncated to avoid overwhelming the context window.
+- Large tool output is truncated before being returned to the model.
 
-## Running Locally
+## Run Locally
 
 1. Install Python 3.8+.
 2. Install dependencies:
@@ -102,7 +104,7 @@ Recent checks for the `s03` workflow:
 
 - Continue implementing later lessons beyond `s03`
 - Add more tools as the tutorial expands
-- Explore background tasks, delegation, and team workflows in later stages
+- Explore background jobs, delegation, and multi-agent workflows in later steps
 
 ## References
 
