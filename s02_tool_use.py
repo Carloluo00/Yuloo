@@ -6,6 +6,7 @@ from openai import OpenAI
 
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
+from tools import TOOLS, TOOL_HANDLERS
 
 
 MODEL = "qwen3.6-plus"
@@ -16,39 +17,7 @@ client = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
-TOOLS = [
-    {
-        "type": "function",
-        "name": "bash",
-        "description": "Run a command in the current OS shell. On Windows, this is cmd.",
-        "parameters": {
-            "type": "object",
-            "properties": {"command": {"type": "string"}},
-            "required": ["command"],
-        },
-    }
-]
 
-
-def run_bash(command: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
-    if any(item in command for item in dangerous):
-        return "Error: Dangerous command blocked."
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=os.getcwd(),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        output = (result.stdout + result.stderr).strip()
-        return output[:50000] if output else "(no output)"
-    except subprocess.TimeoutExpired:
-        return "Error: Timeout (120s)"
-    except (FileNotFoundError, OSError) as exc:
-        return f"Error: {exc}"
 
 
 def agent_loop(conversation: list, render_final: bool = True, log_path: str | None = None):
@@ -91,15 +60,11 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
         for block in response.output:
             if block.type != "function_call":
                 continue
-
+            
+            handler = TOOL_HANDLERS.get(block.name)
             args = json.loads(block.arguments)
-            command = args["command"]
-            preview = command if len(command) <= 80 else f"{command[:77]}..."
-            print_status(f"Running bash: {preview}", "90")
-            output = run_bash(command)
-            if output.startswith("Error:"):
-                print_status(output, "31")
-
+            print_status(f"Running {block.name}: {args}", "90")
+            output = handler(**args)
             tool_result = {
                 "type": "function_call_output",
                 "call_id": block.call_id,
