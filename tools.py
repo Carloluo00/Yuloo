@@ -2,7 +2,19 @@ import json
 import os
 import subprocess
 from utils import safe_path
+from log import append_session_log, event_to_dict
+from terminal import print_assistant_reply, print_status, print_todo_state
+from openai import OpenAI
+from pathlib import Path
 
+
+WORKDIR = Path.cwd()
+MODEL = "qwen3.6-plus"
+SUBAGENT_SYSTEM = f"You are a coding subagent at {WORKDIR}. Complete the given task, then summarize your findings."
+client = OpenAI(
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
 
 TOOL_HANDLERS = {
     "bash":       lambda **kw: run_bash(kw["command"]),
@@ -84,6 +96,21 @@ TOOLS = [
                 },
             },
             "required": ["items"],
+        },
+    },
+]
+
+PARENT_TOOLS = TOOLS + [
+    {
+        "name": "task",
+        "description": "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string"},
+                "description": {"type": "string", "description": "Short description of the task."},
+            },
+            "required": ["prompt"],
         },
     },
 ]
@@ -179,3 +206,73 @@ class TodoManager:
         return "\n".join(lines)
 
 TODO = TodoManager()
+
+def run_subagent(prompt: str) -> str:
+    sub_conversation = [{"role": "user", "content": prompt}]  # fresh context
+    for _ in range(30):  # safety limit
+        response = client.messages.create(
+            model=MODEL, instructions=SUBAGENT_SYSTEM, input=sub_conversation,
+            tools=TOOLS, max_output_tokens=8000,
+        )
+        response_blocks = [event_to_dict(block) for block in response.output]
+        sub_conversation += response_blocks
+
+        results = []
+        for block in response.content:
+            if block.type != "function_call":
+                continue
+            handler = TOOL_HANDLERS.get(block.name)
+            output = handler(**json.loads(block.arguments)) if handler else f"Error: Unknown tool '{block.name}'"
+            results.append({"type": "function_call_output", "call_id": block.call_id, "output": output})
+        
+        if not results:
+            break
+        sub_conversation += results
+    return "".join(b.text for b in response.content if hasattr(b, "text")) or "(no summary)"
+
+
+
+def run_tool_call(block, log_path: str | None):
+    args = json.loads(block.arguments)
+    print_status(f"Running {block.name}: {args}", "90")
+
+    # run subagents
+    if block.name == "task":
+        desc = block.arguments.get("description", "subtask")
+        prompt = block.arguments.get("prompt", "")
+        print_status(f"Spawning subagent for {desc}...", "80")
+        output = run_subagent(prompt)
+
+
+    handler = TOOL_HANDLERS.get(block.name)
+    if handler is None:
+        error = f"Unknown tool '{block.name}'"
+        output = f"Error: {error}"
+        print_status(output, "31")
+        if log_path:
+            append_session_log("tool_error", {"name": block.name, "args": args, "error": error}, log_path)
+        return output
+    
+
+    try:
+        output = handler(**args)
+    except Exception as exc:
+        output = f"Error: {exc}"
+        print_status(f"{block.name} failed: {exc}", "31")
+        if log_path:
+            append_session_log("tool_error", {"name": block.name, "args": args, "error": str(exc)}, log_path)
+
+    if block.name == "todo":
+        print_todo_state(output)
+        if log_path:
+            append_session_log(
+                "todo_updated",
+                {
+                    "items": args.get("items", []),
+                    "output": output,
+                    "ok": not output.startswith("Error:"),
+                },
+                log_path,
+            )
+
+    return output
