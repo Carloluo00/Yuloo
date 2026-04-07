@@ -31,10 +31,15 @@ def event_to_dict(event) -> dict:
     return {"value": str(event)}
 
 
-def create_session_log_file(model: str = "unknown", cwd: str | None = None, log_dir: str = LOG_DIR) -> str:
+def create_session_log_file(
+    model: str = "unknown",
+    cwd: str | None = None,
+    log_dir: str = LOG_DIR,
+    session_label: str = "session",
+) -> str:
     os.makedirs(log_dir, exist_ok=True)
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    log_path = os.path.join(log_dir, f"s01_session_{session_id}.jsonl")
+    log_path = os.path.join(log_dir, f"{session_label}_{session_id}.jsonl")
     current_cwd = cwd or os.getcwd()
     with open(log_path, "a", encoding="utf-8"):
         pass

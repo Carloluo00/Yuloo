@@ -19,9 +19,19 @@ def print_assistant_reply(reply: str):
         print(f"  {line}")
 
 
+def print_todo_state(todo_text: str):
+    text = (todo_text or "").strip()
+    if not text:
+        return
+
+    print(color("todo", "35"))
+    for line in text.splitlines():
+        print(f"  {line}")
+
+
 def print_banner(model: str, cwd: str, log_path: str):
     print(color("=" * 56, "36"))
-    print(color("s01 interactive shell", "36"))
+    print(color("interactive shell", "36"))
     print(f"  model: {model}")
     print(f"  cwd:   {cwd}")
     print("  commands: /help  /clear  /history  exit")
@@ -47,7 +57,7 @@ def print_history(conversation: list):
                 user_messages.append(content.strip())
 
     if not user_messages:
-        print_status("当前还没有可显示的历史消息。", "33")
+        print_status("No user messages in history yet.", "33")
         return
 
     print(color("recent history", "36"))
