@@ -1,6 +1,6 @@
 import os
 
-from s02_tool_use import MODEL, agent_loop
+from s03_todo_write import MODEL, agent_loop
 from log import append_session_log, create_session_log_file
 from terminal import (
     clear_screen,

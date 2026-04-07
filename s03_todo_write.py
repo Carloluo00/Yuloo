@@ -11,7 +11,7 @@ from tools import TOOLS, TOOL_HANDLERS
 
 WORKDIR = Path.cwd()
 MODEL = "qwen3.6-plus"
-SYSTEM = f"You are a coding agent at {WORKDIR}.  Use tools to solve tasks. Act, don't explain."
+SYSTEM = f"You are a coding agent at {WORKDIR}. Always plan first.Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done. "
 
 client = OpenAI(
     api_key=os.getenv("DASHSCOPE_API_KEY"),
