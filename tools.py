@@ -1,5 +1,6 @@
 import json
 import subprocess
+from copy import deepcopy
 from uuid import uuid4
 from config import (
     DANGEROUS_SHELL_PATTERNS,
@@ -106,7 +107,7 @@ PARENT_TOOLS = TOOLS + [
     {
         "type": "function",
         "name": "task",
-        "description": "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
+        "description": "Spawn a subagent that inherits the parent conversation context, then receives a delegated task prompt.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -233,8 +234,10 @@ def run_subagent(
     log_path: str | None = None,
     parent_call_id: str | None = None,
     description: str | None = None,
+    parent_conversation: list | None = None,
 ) -> str:
-    sub_conversation = [{"role": "user", "content": prompt}]  # fresh context
+    sub_conversation = deepcopy(parent_conversation) if parent_conversation else []
+    sub_conversation.append({"role": "user", "content": prompt})
     subagent_id = f"subagent_{uuid4().hex[:8]}"
     total_turns = 0
     summary = "(no summary)"
@@ -247,6 +250,7 @@ def run_subagent(
                 "parent_call_id": parent_call_id,
                 "description": description or "subtask",
                 "prompt": prompt,
+                "inherited_messages": len(parent_conversation or []),
             },
             log_path,
         )
@@ -323,7 +327,7 @@ def run_subagent(
 
 
 
-def run_tool_call(block, log_path: str | None):
+def run_tool_call(block, log_path: str | None, parent_conversation: list | None = None):
     args = json.loads(block.arguments)
     print_status(f"Running {block.name}: {args}", "90")
 
@@ -337,6 +341,7 @@ def run_tool_call(block, log_path: str | None):
             log_path=log_path,
             parent_call_id=block.call_id,
             description=desc,
+            parent_conversation=parent_conversation,
         )
     else:
         handler = TOOL_HANDLERS.get(block.name)

@@ -63,7 +63,7 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             if block.type != "function_call":
                 continue
 
-            output = run_tool_call(block, log_path)
+            output = run_tool_call(block, log_path, parent_conversation=conversation)
             tool_result = {
                 "type": "function_call_output",
                 "call_id": block.call_id,

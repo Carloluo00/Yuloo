@@ -28,7 +28,7 @@ regression tests that protect the newer delegation behavior.
 - Shared `config.py` for models, client setup, prompt builders, and runtime limits
 - Tool registry with `bash`, `read_file`, `write_file`, `edit_file`, `todo`, and `task`
 - Todo reminders that nudge the agent to keep task state updated
-- Subagents with isolated conversation context and shared filesystem access
+- Subagents that inherit parent conversation context and share filesystem access
 - JSONL session logs for both parent-agent activity and delegated subagent traces
 - Safety checks for dangerous shell commands and workspace path escapes
 - Lightweight regression tests for config, todo flow, and subagent logging
@@ -59,9 +59,10 @@ regression tests that protect the newer delegation behavior.
 4. delegate bounded subtasks to subagents
 5. log both parent and subagent execution traces
 
-Subagents do not inherit the full parent conversation. They start with a fresh
-prompt, but they operate in the same workspace and can use the same local tool
-set. This keeps delegation inspectable and easy to debug.
+Subagents inherit the parent conversation snapshot, then receive the delegated
+task prompt as a new user message. They still operate in the same workspace and
+can use the same local tool set, which keeps delegation inspectable while
+giving workers the context they need.
 
 ## Built-in Tools
 

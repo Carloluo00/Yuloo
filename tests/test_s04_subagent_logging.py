@@ -140,6 +140,62 @@ class SubagentLoggingTests(unittest.TestCase):
         self.assertEqual([payload["turn"] for payload in response_payloads], [1, 2])
         self.assertTrue(all(payload["parent_call_id"] == "parent-call-2" for payload in response_payloads))
 
+    def test_task_subagent_inherits_parent_conversation_before_prompt(self):
+        client = FakeClient(
+            [
+                make_response(
+                    [
+                        make_block(
+                            "message",
+                            content=[SimpleNamespace(type="output_text", text="delegated summary")],
+                        )
+                    ],
+                    output_text="delegated summary",
+                )
+            ]
+        )
+        parent_conversation = [
+            {"role": "user", "content": "Parent request"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Parent context"}],
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "todo-call-1",
+                "output": "[ ] #1: delegated task",
+            },
+        ]
+        task_block = make_block(
+            "function_call",
+            name="task",
+            arguments=json.dumps(
+                {
+                    "prompt": "Only inspect README and summarize the delegation-relevant parts.",
+                    "description": "inspect docs",
+                }
+            ),
+            call_id="parent-call-3",
+        )
+
+        with patch.object(tools, "client", client), patch.object(tools, "print_status"):
+            output = tools.run_tool_call(task_block, None, parent_conversation=parent_conversation)
+
+        self.assertEqual(output, "delegated summary")
+        self.assertEqual(len(client.responses.calls), 1)
+        subagent_input = client.responses.calls[0]["input"]
+        self.assertEqual(subagent_input[:-1], parent_conversation)
+        self.assertEqual(
+            subagent_input[-1],
+            {
+                "role": "user",
+                "content": "Only inspect README and summarize the delegation-relevant parts.",
+            },
+        )
+        self.assertIsNot(subagent_input, parent_conversation)
+        self.assertEqual(parent_conversation[-1]["output"], "[ ] #1: delegated task")
+
 
 if __name__ == "__main__":
     unittest.main()
