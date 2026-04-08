@@ -2,99 +2,98 @@
 
 [English README](README.md)
 
-Yuloo 是一个紧凑的、按阶段演进的 Agent 工程学习项目，基于
-DashScope 提供的 OpenAI 兼容接口构建。仓库从最小可用的单 Agent
-循环开始，逐步加入工具调用、todo 规划、subagent 委托、结构化 JSONL
-日志，以及统一的运行时配置层。
+Yuloo 是一个偏教学型的小型代码代理项目，灵感来自
+[shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code)。
+它基于 DashScope 提供的 OpenAI 兼容接口来驱动 Qwen 模型，重点不是做一个庞大框架，
+而是用尽量短小、可读的代码，把 agent loop、工具调用、任务规划、子代理委托和结构化日志
+一步一步搭起来。
 
 ## 项目说明
 
-这个仓库更像一条学习路径，而不是一个一次性完成的大型应用。每个
-`s0x_*.py` 文件都代表 Agent 能力演进中的一个阶段：
+这个仓库采用“渐进式阶段演进”的设计，而不是一次性堆出完整系统。每个阶段只新增一个核心能力：
 
-- `s01_agent_loop.py`：最小 Agent 循环，只提供 `bash` 工具
-- `s02_tool_use.py`：扩展为通用工具调用，支持 shell 与文件操作
-- `s03_todo_write.py`：加入基于 todo 的显式规划与进度跟踪
-- `s04_subagents.py`：通过 `task` 工具进行主 Agent 委托，并记录
-  subagent 的完整执行轨迹
+- `s01`：最小可运行的 responses loop
+- `s02`：本地工具调用，支持 shell 和文件操作
+- `s03`：引入 `todo` 驱动的规划与进度跟踪
+- `s04`：引入 `task` 工具，实现主代理到子代理的委托
 
-当前 CLI 入口在 [main.py](main.py)，默认运行 `s04` 流程。
+当前 CLI 入口是 `main.py`，默认运行 `s04` 流程。最新版本还加入了统一配置管理、
+子代理运行轨迹日志，以及覆盖这些能力的回归测试。
 
-## 当前能力
+## 亮点
 
-- 基于 DashScope OpenAI 兼容 SDK 的 Agent 运行时
-- Shell、文件读取、文件写入、定点文本编辑等工具调用
-- 带 `pending`、`in_progress`、`completed` 状态的 todo 管理
-- 主 Agent 通过 `task` 工具委托子 Agent
-- 父子 Agent 共用一份 JSONL 会话日志
-- 在 [config.py](config.py) 中统一管理运行参数
-- 对 todo 流程、共享配置、subagent 日志能力的回归测试
+- 代码量小，适合阅读和学习 agent 架构
+- 使用统一的 `config.py` 管理模型、客户端、提示词和运行时参数
+- 提供 `bash`、`read_file`、`write_file`、`edit_file`、`todo`、`task` 六类工具
+- 通过 reminder 机制提醒 agent 维护 todo 状态
+- 子代理拥有独立上下文，但与主代理共享同一工作区
+- 使用 JSONL 记录主代理与子代理的完整运行轨迹
+- 对危险 shell 命令和越界文件路径做了基础保护
+- 提供配置、todo 流程、子代理日志等回归测试
 
-## 仓库结构
+## 项目结构
 
-- [main.py](main.py)：交互式 CLI 入口
-- [config.py](config.py)：共享运行时配置、prompt 构造函数与 client 工厂
-- [s01_agent_loop.py](s01_agent_loop.py)：基础单工具 Agent
-- [s02_tool_use.py](s02_tool_use.py)：通用工具调用阶段
-- [s03_todo_write.py](s03_todo_write.py)：todo 规划阶段
-- [s04_subagents.py](s04_subagents.py)：subagent 委托阶段
-- [tools.py](tools.py)：工具注册、工具处理器与 subagent 运行时
-- [terminal.py](terminal.py)：终端输出辅助函数
-- [log.py](log.py)：JSONL 会话日志工具
-- [utils.py](utils.py)：工作区安全路径校验
-- [tests/test_s03_todo_write.py](tests/test_s03_todo_write.py)：todo 流程测试
-- [tests/test_s04_subagent_logging.py](tests/test_s04_subagent_logging.py)：
-  subagent 日志测试
-- [tests/test_config.py](tests/test_config.py)：共享配置测试
+- `main.py`：CLI 入口，连接当前最新阶段
+- `config.py`：统一配置、prompt builder、client builder
+- `s01_agent_loop.py`：最简 bash agent loop
+- `s02_tool_use.py`：加入文件与 shell 工具
+- `s03_todo_write.py`：加入 todo 规划与 reminder
+- `s04_subagents.py`：加入子代理委托
+- `tools.py`：共享工具定义、处理器和子代理运行逻辑
+- `terminal.py`：终端输出辅助
+- `log.py`：JSONL 日志写入与事件转换
+- `utils.py`：工作区路径安全检查
+- `tests/test_s03_todo_write.py`：todo 流程回归测试
+- `tests/test_s04_subagent_logging.py`：子代理日志回归测试
+- `tests/test_config.py`：统一配置回归测试
+
+## 当前运行形态
+
+`main.py` 当前默认启动 `s04` agent loop。它可以：
+
+1. 接收用户请求
+2. 直接调用本地工具
+3. 用 todo 管理多步骤任务
+4. 把局部任务委托给子代理
+5. 记录主代理和子代理的运行轨迹
+
+子代理不会继承完整的主代理对话历史，而是从一个新的 prompt 开始；
+但它和主代理共享同一个工作区，并且可以使用同一套本地工具。
+这种设计让委托行为更容易理解，也更容易调试。
 
 ## 内置工具
 
 | 工具 | 作用 |
 | --- | --- |
-| `bash` | 在工作区执行 shell 命令 |
-| `read_file` | 读取文件内容，可选行数限制 |
-| `write_file` | 写入整个文件内容 |
-| `edit_file` | 对文件做精确文本替换 |
-| `todo` | 跟踪多步骤任务列表 |
-| `task` | 从主 Agent 派生一个新上下文的 subagent |
+| `bash` | 在工作区内执行 shell 命令 |
+| `read_file` | 读取文件内容，可限制返回行数 |
+| `write_file` | 写入文件 |
+| `edit_file` | 精确替换文件中的文本 |
+| `todo` | 维护带状态的任务列表 |
+| `task` | 启动子代理处理委托任务 |
 
 ## 日志
 
-会话日志会写入 `logs/*.jsonl`，包括：
+运行日志以 JSONL 形式保存在 `logs/` 目录下。当前版本会记录：
 
 - 会话开始与结束
-- 用户输入
 - assistant 响应块
-- 工具结果与工具错误
-- todo reminder 注入
-- subagent 生命周期事件：
-  `subagent_started`、`subagent_response`、`subagent_tool_result`、
-  `subagent_finished`
+- 工具调用结果和错误
+- todo 更新与 reminder 注入
+- 子代理启动、每轮响应、工具结果和结束摘要
 
-这样一份日志就可以还原主 Agent 与 subagent 的完整执行轨迹。
+这意味着你不仅能看到主代理“做了什么决定”，还能追踪子代理“实际做了什么”。
 
 ## 安全说明
 
-- 会阻止 `rm -rf /`、`sudo`、`shutdown`、`reboot` 等危险 shell 命令。
-- 文件操作通过 [utils.py](utils.py) 中的 `safe_path()` 校验，避免逃逸工作区。
-- shell 命令带有超时限制。
-- 过长的工具输出会在返回给模型前被截断。
-
-## 配置
-
-[config.py](config.py) 统一管理：
-
-- 各阶段模型配置
-- DashScope 基础 URL 与 API Key 环境变量名
-- 工作目录与日志目录
-- todo reminder 行为
-- subagent 最大轮数
-- shell 超时与输出截断上限
-- 各阶段系统提示词构造函数
+- 会阻止 `rm -rf /`、`sudo`、`shutdown`、`reboot` 等危险 shell 模式
+- 文件操作通过 `safe_path()` 校验，避免逃逸工作区
+- shell 命令会在配置的超时时间后终止
+- 过长的工具输出会先截断，再返回给模型
 
 ## 本地运行
 
-1. 安装 Python 3.8+。
+1. 安装 Python 3.8+
 2. 安装依赖：
 
 ```bash
@@ -115,29 +114,30 @@ python main.py
 
 ## CLI 命令
 
-- `/help`：显示可用命令
+- `/help`：显示帮助
 - `/clear`：清空当前会话上下文
 - `/history`：查看最近的用户消息
 - `q`、`quit`、`exit`：退出程序
 
 ## 验证
 
-当前使用的验证命令：
+当前建议执行的验证命令：
 
-- `python -m unittest discover -s tests -p "test_*.py"`
-- `python -m py_compile config.py log.py utils.py s01_agent_loop.py s02_tool_use.py s03_todo_write.py s04_subagents.py tools.py main.py`
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+python -m py_compile config.py log.py main.py s01_agent_loop.py s02_tool_use.py s03_todo_write.py s04_subagents.py terminal.py tools.py utils.py tests/test_config.py tests/test_s03_todo_write.py tests/test_s04_subagent_logging.py
+```
 
 ## 后续计划
 
-- 继续推进 `s04` 之后的演进阶段
-- 增加更丰富的 Agent 协作模式与执行控制
-- 扩展对早期阶段的测试覆盖
-- 完善日志分析与配置说明文档
+- 继续把阶段式教程推进到 `s04` 之后
+- 改进委托策略和更丰富的子代理协作
+- 为更早期阶段补更多测试
+- 增加关于 prompt 设计和运行轨迹的文档
 
 ## 参考资料
 
-- 原始项目灵感：
-  [shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code)
+- 原项目：[shareAI-lab/learn-claude-code](https://github.com/shareAI-lab/learn-claude-code)
 - DashScope 文档：<https://help.aliyun.com/zh/dashscope/>
 - DashScope OpenAI 兼容接口文档：
   <https://help.aliyun.com/zh/dashscope/developer-reference/compatibility-of-openai-with-dashscope>
