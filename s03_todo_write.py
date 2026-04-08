@@ -1,28 +1,20 @@
 import json
-import os
-import subprocess
-from pathlib import Path
-
-from openai import OpenAI
-
+from config import (
+    S03_MODEL,
+    TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
+    TODO_REMINDER_MESSAGE as CONFIG_TODO_REMINDER_MESSAGE,
+    build_client,
+    build_s03_system,
+)
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status, print_todo_state
 from tools import TOOLS, TOOL_HANDLERS
 
-WORKDIR = Path.cwd()
-MODEL = "qwen3.6-plus"
-TODO_REMINDER_INTERVAL = 3
-TODO_REMINDER_MESSAGE = "Reminder: update your todo list if task status changed."
-SYSTEM = (
-    f"You are a coding agent at {WORKDIR}. "
-    "Always plan first. Use the todo tool to plan multi-step tasks. "
-    "Mark a task in_progress before starting it and completed when done."
-)
-
-client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-)
+MODEL = S03_MODEL
+TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
+TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
+SYSTEM = build_s03_system()
+client = build_client()
 
 
 def run_tool_call(block, log_path: str | None):

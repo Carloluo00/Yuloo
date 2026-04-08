@@ -1,20 +1,21 @@
 import json
-import os
 import subprocess
 
-from openai import OpenAI
-
+from config import (
+    DANGEROUS_SHELL_PATTERNS,
+    S01_MODEL,
+    SHELL_TIMEOUT_SECONDS,
+    TOOL_OUTPUT_CHAR_LIMIT,
+    build_client,
+    build_s01_system,
+)
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
 
 
-MODEL = "qwen3.6-plus"
-SYSTEM = f"You are a coding agent at {os.getcwd()}. Use bash to solve tasks. Act, don't explain."
-
-client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-)
+MODEL = S01_MODEL
+SYSTEM = build_s01_system()
+client = build_client()
 
 TOOLS = [
     {
@@ -31,22 +32,21 @@ TOOLS = [
 
 
 def run_bash(command: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
-    if any(item in command for item in dangerous):
+    if any(item in command for item in DANGEROUS_SHELL_PATTERNS):
         return "Error: Dangerous command blocked."
     try:
         result = subprocess.run(
             command,
             shell=True,
-            cwd=os.getcwd(),
+            cwd=None,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=SHELL_TIMEOUT_SECONDS,
         )
         output = (result.stdout + result.stderr).strip()
-        return output[:50000] if output else "(no output)"
+        return output[:TOOL_OUTPUT_CHAR_LIMIT] if output else "(no output)"
     except subprocess.TimeoutExpired:
-        return "Error: Timeout (120s)"
+        return f"Error: Timeout ({SHELL_TIMEOUT_SECONDS}s)"
     except (FileNotFoundError, OSError) as exc:
         return f"Error: {exc}"
 

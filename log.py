@@ -2,8 +2,9 @@ from datetime import datetime
 import json
 import os
 
+from config import LOG_DIR
 
-LOG_DIR = os.path.join(os.getcwd(), "logs")
+LOG_DIR = str(LOG_DIR)
 
 
 def append_session_log(event: str, payload: dict, log_path: str):

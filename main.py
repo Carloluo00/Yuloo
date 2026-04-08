@@ -1,7 +1,7 @@
 import os
 
 from log import append_session_log, create_session_log_file
-from s03_todo_write import MODEL, agent_loop
+from s04_subagents import MODEL, agent_loop
 from terminal import (
     clear_screen,
     print_assistant_reply,

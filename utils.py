@@ -2,8 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from config import WORKDIR
 
-WORKDIR = Path.cwd()
 
 def safe_path(p: str) -> str:
     path = (WORKDIR / p).resolve()

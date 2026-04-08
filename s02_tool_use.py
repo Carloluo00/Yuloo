@@ -1,22 +1,12 @@
 import json
-import os
-import subprocess
-from pathlib import Path
-
-from openai import OpenAI
-
+from config import S02_MODEL, build_client, build_s02_system
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
 from tools import TOOLS, TOOL_HANDLERS
 
-WORKDIR = Path.cwd()
-MODEL = "qwen3.6-plus"
-SYSTEM = f"You are a coding agent at {WORKDIR}.  Use tools to solve tasks. Act, don't explain."
-
-client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-)
+MODEL = S02_MODEL
+SYSTEM = build_s02_system()
+client = build_client()
 
 
 

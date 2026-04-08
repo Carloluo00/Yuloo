@@ -1,20 +1,22 @@
 import json
-import os
 import subprocess
+from uuid import uuid4
+from config import (
+    DANGEROUS_SHELL_PATTERNS,
+    SHELL_TIMEOUT_SECONDS,
+    SUBAGENT_MAX_TURNS,
+    SUBAGENT_MODEL,
+    TOOL_OUTPUT_CHAR_LIMIT,
+    build_client,
+    build_subagent_system,
+)
 from utils import safe_path
 from log import append_session_log, event_to_dict
-from terminal import print_assistant_reply, print_status, print_todo_state
-from openai import OpenAI
-from pathlib import Path
+from terminal import print_status, print_todo_state
 
-
-WORKDIR = Path.cwd()
-MODEL = "qwen3.6-plus"
-SUBAGENT_SYSTEM = f"You are a coding subagent at {WORKDIR}. Complete the given task, then summarize your findings."
-client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-)
+MODEL = SUBAGENT_MODEL
+SUBAGENT_SYSTEM = build_subagent_system()
+client = build_client()
 
 TOOL_HANDLERS = {
     "bash":       lambda **kw: run_bash(kw["command"]),
@@ -102,6 +104,7 @@ TOOLS = [
 
 PARENT_TOOLS = TOOLS + [
     {
+        "type": "function",
         "name": "task",
         "description": "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
         "parameters": {
@@ -116,22 +119,20 @@ PARENT_TOOLS = TOOLS + [
 ]
 
 def run_bash(command: str) -> str:
-    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
-    if any(item in command for item in dangerous):
+    if any(item in command for item in DANGEROUS_SHELL_PATTERNS):
         return "Error: Dangerous command blocked."
     try:
         result = subprocess.run(
             command,
             shell=True,
-            cwd=os.getcwd(),
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=SHELL_TIMEOUT_SECONDS,
         )
         output = (result.stdout + result.stderr).strip()
-        return output[:50000] if output else "(no output)"
+        return output[:TOOL_OUTPUT_CHAR_LIMIT] if output else "(no output)"
     except subprocess.TimeoutExpired:
-        return "Error: Timeout (120s)"
+        return f"Error: Timeout ({SHELL_TIMEOUT_SECONDS}s)"
     except (FileNotFoundError, OSError) as exc:
         return f"Error: {exc}"
     
@@ -145,7 +146,7 @@ def run_read(path: str, limit: int = None) -> str:
         lines = text.splitlines()
         if limit and len(lines) > limit:
             lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
-        return "\n".join(lines)[:50000]
+        return "\n".join(lines)[:TOOL_OUTPUT_CHAR_LIMIT]
     except Exception as e:
         return f"Error: {e}"
 
@@ -207,28 +208,118 @@ class TodoManager:
 
 TODO = TodoManager()
 
-def run_subagent(prompt: str) -> str:
+def extract_response_text(response) -> str:
+    output_text = getattr(response, "output_text", "")
+    if output_text:
+        return output_text
+
+    parts = []
+    for block in getattr(response, "output", []):
+        if hasattr(block, "text"):
+            parts.append(block.text)
+            continue
+        content = getattr(block, "content", None)
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            text = getattr(item, "text", "")
+            if text:
+                parts.append(text)
+    return "".join(parts)
+
+
+def run_subagent(
+    prompt: str,
+    log_path: str | None = None,
+    parent_call_id: str | None = None,
+    description: str | None = None,
+) -> str:
     sub_conversation = [{"role": "user", "content": prompt}]  # fresh context
-    for _ in range(30):  # safety limit
-        response = client.messages.create(
+    subagent_id = f"subagent_{uuid4().hex[:8]}"
+    total_turns = 0
+    summary = "(no summary)"
+
+    if log_path:
+        append_session_log(
+            "subagent_started",
+            {
+                "subagent_id": subagent_id,
+                "parent_call_id": parent_call_id,
+                "description": description or "subtask",
+                "prompt": prompt,
+            },
+            log_path,
+        )
+
+    for turn in range(1, SUBAGENT_MAX_TURNS + 1):  # safety limit
+        total_turns = turn
+        response = client.responses.create(
             model=MODEL, instructions=SUBAGENT_SYSTEM, input=sub_conversation,
             tools=TOOLS, max_output_tokens=8000,
         )
         response_blocks = [event_to_dict(block) for block in response.output]
         sub_conversation += response_blocks
+        summary = extract_response_text(response) or summary
+
+        if log_path:
+            append_session_log(
+                "subagent_response",
+                {
+                    "subagent_id": subagent_id,
+                    "parent_call_id": parent_call_id,
+                    "turn": turn,
+                    "output_text": summary,
+                    "blocks": response_blocks,
+                },
+                log_path,
+            )
 
         results = []
-        for block in response.content:
+        for block in response.output:
             if block.type != "function_call":
                 continue
             handler = TOOL_HANDLERS.get(block.name)
-            output = handler(**json.loads(block.arguments)) if handler else f"Error: Unknown tool '{block.name}'"
+            args = json.loads(block.arguments)
+            try:
+                output = handler(**args) if handler else f"Error: Unknown tool '{block.name}'"
+            except Exception as exc:
+                output = f"Error: {exc}"
             results.append({"type": "function_call_output", "call_id": block.call_id, "output": output})
+
+            if log_path:
+                append_session_log(
+                    "subagent_tool_result",
+                    {
+                        "subagent_id": subagent_id,
+                        "parent_call_id": parent_call_id,
+                        "turn": turn,
+                        "call_id": block.call_id,
+                        "name": block.name,
+                        "args": args,
+                        "output": output,
+                        "ok": not output.startswith("Error:"),
+                    },
+                    log_path,
+                )
         
         if not results:
             break
         sub_conversation += results
-    return "".join(b.text for b in response.content if hasattr(b, "text")) or "(no summary)"
+
+    if log_path:
+        append_session_log(
+            "subagent_finished",
+            {
+                "subagent_id": subagent_id,
+                "parent_call_id": parent_call_id,
+                "description": description or "subtask",
+                "turns": total_turns,
+                "summary": summary,
+            },
+            log_path,
+        )
+
+    return summary
 
 
 
@@ -238,41 +329,44 @@ def run_tool_call(block, log_path: str | None):
 
     # run subagents
     if block.name == "task":
-        desc = block.arguments.get("description", "subtask")
-        prompt = block.arguments.get("prompt", "")
+        desc = args.get("description", "subtask")
+        prompt = args.get("prompt", "")
         print_status(f"Spawning subagent for {desc}...", "80")
-        output = run_subagent(prompt)
+        output = run_subagent(
+            prompt,
+            log_path=log_path,
+            parent_call_id=block.call_id,
+            description=desc,
+        )
+    else:
+        handler = TOOL_HANDLERS.get(block.name)
+        if handler is None:
+            error = f"Unknown tool '{block.name}'"
+            output = f"Error: {error}"
+            print_status(output, "31")
+            if log_path:
+                append_session_log("tool_error", {"name": block.name, "args": args, "error": error}, log_path)
+            return output
+        
+        try:
+            output = handler(**args)
+        except Exception as exc:
+            output = f"Error: {exc}"
+            print_status(f"{block.name} failed: {exc}", "31")
+            if log_path:
+                append_session_log("tool_error", {"name": block.name, "args": args, "error": str(exc)}, log_path)
 
-
-    handler = TOOL_HANDLERS.get(block.name)
-    if handler is None:
-        error = f"Unknown tool '{block.name}'"
-        output = f"Error: {error}"
-        print_status(output, "31")
-        if log_path:
-            append_session_log("tool_error", {"name": block.name, "args": args, "error": error}, log_path)
-        return output
-    
-
-    try:
-        output = handler(**args)
-    except Exception as exc:
-        output = f"Error: {exc}"
-        print_status(f"{block.name} failed: {exc}", "31")
-        if log_path:
-            append_session_log("tool_error", {"name": block.name, "args": args, "error": str(exc)}, log_path)
-
-    if block.name == "todo":
-        print_todo_state(output)
-        if log_path:
-            append_session_log(
-                "todo_updated",
-                {
-                    "items": args.get("items", []),
-                    "output": output,
-                    "ok": not output.startswith("Error:"),
-                },
-                log_path,
-            )
+        if block.name == "todo":
+            print_todo_state(output)
+            if log_path:
+                append_session_log(
+                    "todo_updated",
+                    {
+                        "items": args.get("items", []),
+                        "output": output,
+                        "ok": not output.startswith("Error:"),
+                    },
+                    log_path,
+                )
 
     return output
