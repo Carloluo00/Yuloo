@@ -1,6 +1,7 @@
 import json
 import subprocess
 from copy import deepcopy
+from json import JSONDecodeError
 from uuid import uuid4
 from config import (
     DANGEROUS_SHELL_PATTERNS,
@@ -81,12 +82,21 @@ TOOLS = [
     {
         "type": "function",
         "name": "todo",
-        "description": "Manage a todo list. Update task list. Track progress on multi-step tasks.",
+        "description": (
+            "Manage a todo list for multi-step tasks. "
+            "Pass items as a native JSON array in the function arguments, never a quoted string. "
+            'Example: {"items":[{"id":"1","text":"Inspect logs","status":"in_progress"}]}'
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "items": {
                     "type": "array",
+                    "description": (
+                        "Native JSON array of todo objects. Do not stringify this array. "
+                        'Use [{"id":"1","text":"Inspect logs","status":"in_progress"}], not "[...]"'
+                    ),
+                    "maxItems": 20,
                     "items": {
                         "type": "object",
                         "properties": {
@@ -94,11 +104,13 @@ TOOLS = [
                             "text": {"type": "string"},
                             "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
                         },
-                        "required": ["id", "text", "status"]
+                        "required": ["id", "text", "status"],
+                        "additionalProperties": False,
                     },
                 },
             },
             "required": ["items"],
+            "additionalProperties": False,
         },
     },
 ]
@@ -175,24 +187,49 @@ class TodoManager:
     def __init__(self):
         self.items = []
 
-    def update(self, items: list) -> str:
+    def _normalize_items(self, items) -> list[dict]:
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except JSONDecodeError as exc:
+                raise ValueError(
+                    "todo.items was a string but not valid JSON. "
+                    'Pass a native JSON array like {"items":[...]} instead of quoting the array.'
+                ) from exc
+
+        if not isinstance(items, list):
+            raise ValueError(
+                f"todo.items must be a JSON array of todo objects, got {type(items).__name__}"
+            )
+
+        return items
+
+    def update(self, items) -> str:
+        items = self._normalize_items(items)
         if len(items) > 20:
-            raise ValueError("Max 20 todos allowed")
+            raise ValueError(f"todo.items may contain at most 20 entries; received {len(items)}")
         validated = []
         in_progress_count = 0
         for i, item in enumerate(items):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"todo.items[{i}] must be an object with id/text/status, got {type(item).__name__}"
+                )
             text = str(item.get("text", "")).strip()
             status = str(item.get("status", "pending")).lower()
             item_id = str(item.get("id", str(i + 1)))
             if not text:
-                raise ValueError(f"Item {item_id}: text required")
+                raise ValueError(f"todo.items[{i}] (id={item_id}): text is required")
             if status not in ("pending", "in_progress", "completed"):
-                raise ValueError(f"Item {item_id}: invalid status '{status}'")
+                raise ValueError(
+                    f"todo.items[{i}] (id={item_id}): invalid status '{status}'. "
+                    "Expected pending, in_progress, or completed"
+                )
             if status == "in_progress":
                 in_progress_count += 1
             validated.append({"id": item_id, "text": text, "status": status})
         if in_progress_count > 1:
-            raise ValueError("Only one task can be in_progress at a time")
+            raise ValueError("todo.items can contain only one in_progress entry at a time")
         self.items = validated
         return self.render()
     

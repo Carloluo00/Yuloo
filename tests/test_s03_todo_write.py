@@ -94,7 +94,7 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(result, "done")
         tool_output = next(item for item in conversation if item.get("type") == "function_call_output")
         self.assertIn("Error:", tool_output["output"])
-        self.assertIn("Only one task can be in_progress", tool_output["output"])
+        self.assertIn("only one in_progress entry", tool_output["output"])
         self.assertTrue(any(event == "tool_error" and payload["name"] == "todo" for event, payload, _ in logged_events))
 
 
