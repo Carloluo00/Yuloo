@@ -37,6 +37,7 @@ def create_session_log_file(
     cwd: str | None = None,
     log_dir: str = DEFAULT_LOG_DIR,
     session_label: str = "session",
+    metadata: dict | None = None,
 ) -> str:
     os.makedirs(log_dir, exist_ok=True)
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -44,9 +45,12 @@ def create_session_log_file(
     current_cwd = cwd or os.getcwd()
     with open(log_path, "a", encoding="utf-8"):
         pass
+    payload = {"session_id": session_id, "model": model, "cwd": current_cwd}
+    if metadata:
+        payload.update(metadata)
     append_session_log(
         "session_started",
-        {"session_id": session_id, "model": model, "cwd": current_cwd},
+        payload,
         log_path,
     )
     return log_path

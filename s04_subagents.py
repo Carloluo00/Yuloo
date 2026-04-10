@@ -1,5 +1,5 @@
 from config import (
-    S04_MODEL,
+    DEFAULT_MODEL,
     TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
     TODO_REMINDER_MESSAGE as CONFIG_TODO_REMINDER_MESSAGE,
     build_client,
@@ -9,7 +9,7 @@ from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
 from tools import PARENT_TOOLS, maybe_add_todo_reminder, run_tool_call
 
-MODEL = S04_MODEL
+MODEL = DEFAULT_MODEL
 TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
 TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
 SYSTEM = build_s04_system()

@@ -3,21 +3,20 @@ from config import (
     TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
     TODO_REMINDER_MESSAGE as CONFIG_TODO_REMINDER_MESSAGE,
     build_client,
-    build_s03_system,
+    build_s05_system,
 )
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
-from tools import TOOLS, maybe_add_todo_reminder, run_tool_call as shared_run_tool_call
+from tools import SKILL_REGISTRY, PARENT_TOOLS, maybe_add_todo_reminder, run_tool_call
 
 MODEL = DEFAULT_MODEL
 TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
 TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
-SYSTEM = build_s03_system()
+RUNTIME_NAME = "s05_skill_loading"
+SESSION_LABEL = "skill_agent_session"
+AVAILABLE_SKILLS_TEXT = SKILL_REGISTRY.describe_available()
+SYSTEM = f"{build_s05_system()}\n\nAvailable skills:\n{AVAILABLE_SKILLS_TEXT}"
 client = build_client()
-
-
-def run_tool_call(block, log_path: str | None):
-    return shared_run_tool_call(block, log_path)
 
 
 def agent_loop(conversation: list, render_final: bool = True, log_path: str | None = None):
@@ -29,7 +28,7 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             model=MODEL,
             instructions=SYSTEM,
             input=conversation,
-            tools=TOOLS,
+            tools=PARENT_TOOLS,
             max_output_tokens=8000,
         )
 
@@ -63,7 +62,7 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             if block.type != "function_call":
                 continue
 
-            output = run_tool_call(block, log_path)
+            output = run_tool_call(block, log_path, parent_conversation=conversation)
             tool_result = {
                 "type": "function_call_output",
                 "call_id": block.call_id,
@@ -74,6 +73,7 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             results.append(tool_result)
             if log_path:
                 append_session_log("tool_result", tool_result, log_path)
+
         conversation += results
         if not results:
             if render_final:
@@ -88,4 +88,5 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             TODO_REMINDER_INTERVAL,
             TODO_REMINDER_MESSAGE,
         )
+
 

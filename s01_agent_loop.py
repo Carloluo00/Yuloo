@@ -2,8 +2,8 @@ import json
 import subprocess
 
 from config import (
+    DEFAULT_MODEL,
     DANGEROUS_SHELL_PATTERNS,
-    S01_MODEL,
     SHELL_TIMEOUT_SECONDS,
     TOOL_OUTPUT_CHAR_LIMIT,
     build_client,
@@ -13,7 +13,7 @@ from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
 
 
-MODEL = S01_MODEL
+MODEL = DEFAULT_MODEL
 SYSTEM = build_s01_system()
 client = build_client()
 

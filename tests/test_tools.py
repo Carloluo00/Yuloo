@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import config
@@ -18,13 +19,44 @@ class TodoToolTests(unittest.TestCase):
 
         self.assertIn("JSON array", todo_tool["description"])
         self.assertIn("never a quoted string", todo_tool["description"])
-        self.assertIn(
+        self.assertNotIn(
             "Use the todo tool with items as a native JSON array",
             config.build_s03_system(config.WORKDIR),
         )
-        self.assertIn(
+        self.assertNotIn(
             "Do not wrap todo.items in quotes",
             config.build_s04_system(config.WORKDIR),
+        )
+
+    def test_skill_tool_uses_singular_load_skill_name(self):
+        skill_tool = get_tool("load_skill")
+
+        self.assertEqual(skill_tool["name"], "load_skill")
+        self.assertFalse(any(tool_def["name"] == "load_skills" for tool_def in tools.TOOLS))
+
+    def test_run_tool_call_logs_skill_load_event(self):
+        block = SimpleNamespace(
+            type="function_call",
+            name="load_skill",
+            arguments='{"name":"planner"}',
+            call_id="skill-call-1",
+        )
+        logged_events = []
+
+        def fake_log(event, payload, log_path):
+            logged_events.append((event, payload, log_path))
+
+        with patch.object(tools.SKILL_REGISTRY, "load_full_text", return_value="<skill name=\"planner\">\nbody\n</skill>"), patch.object(
+            tools, "append_session_log", side_effect=fake_log
+        ), patch.object(tools, "print_status"), patch.object(tools, "print_skill_state"):
+            output = tools.run_tool_call(block, "logs/test.jsonl")
+
+        self.assertEqual(output, "<skill name=\"planner\">\nbody\n</skill>")
+        self.assertTrue(
+            any(
+                event == "skill_loaded" and payload["name"] == "planner" and payload["ok"]
+                for event, payload, _ in logged_events
+            )
         )
 
     def test_update_accepts_json_encoded_array_string(self):

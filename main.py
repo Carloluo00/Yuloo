@@ -1,48 +1,30 @@
 import os
 
 from log import append_session_log, create_session_log_file
-from s04_subagents import MODEL, agent_loop
-from terminal import (
-    clear_screen,
-    print_assistant_reply,
-    print_banner,
-    print_help,
-    print_history,
-    print_status,
-)
+from s05_skill_loading import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
+from terminal import print_assistant_reply, print_banner, print_status
+from utils import count_available_skills, handle_builtin_command, is_exit_command
 
 
-PROMPT = "\033[36magent >> \033[0m"
-EXIT_COMMANDS = {"q", "quit", "exit"}
-BUILTIN_COMMANDS = {"/help", "/clear", "/history"}
-
-
-def is_exit_command(query: str) -> bool:
-    return query.strip().lower() in EXIT_COMMANDS
-
-
-def handle_builtin_command(query: str, conversation: list, log_path: str) -> bool:
-    command = query.strip().lower()
-    if command not in BUILTIN_COMMANDS:
-        return False
-
-    if command == "/help":
-        print_help(log_path)
-    elif command == "/clear":
-        conversation.clear()
-        append_session_log("conversation_cleared", {"remaining_messages": len(conversation)}, log_path)
-        clear_screen()
-        print_banner(MODEL, os.getcwd(), log_path)
-        print_status("Conversation context cleared.", "33")
-    elif command == "/history":
-        print_history(conversation)
-    return True
+PROMPT = "\033[36mskill-agent >> \033[0m"
 
 
 def run_cli():
     conversation = []
-    log_path = create_session_log_file(model=MODEL, cwd=os.getcwd(), session_label="agent_session")
-    print_banner(MODEL, os.getcwd(), log_path)
+    skill_count = count_available_skills(AVAILABLE_SKILLS_TEXT)
+    log_path = create_session_log_file(
+        model=MODEL,
+        cwd=os.getcwd(),
+        session_label=SESSION_LABEL,
+        metadata={"runtime": RUNTIME_NAME, "skills_available": skill_count},
+    )
+    print_banner(
+        MODEL,
+        os.getcwd(),
+        log_path,
+        runtime_name=RUNTIME_NAME,
+        skills_available=skill_count,
+    )
 
     while True:
         try:
@@ -63,7 +45,15 @@ def run_cli():
             print_status("See you next time.", "90")
             break
 
-        if handle_builtin_command(trimmed, conversation, log_path):
+        if handle_builtin_command(
+            trimmed,
+            conversation,
+            log_path,
+            model=MODEL,
+            runtime_name=RUNTIME_NAME,
+            available_skills_text=AVAILABLE_SKILLS_TEXT,
+            cwd=os.getcwd(),
+        ):
             continue
 
         conversation.append({"role": "user", "content": query})

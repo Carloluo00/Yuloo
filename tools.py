@@ -1,22 +1,26 @@
 import json
 import subprocess
+import re
+from dataclasses import dataclass
+from pathlib import Path
 from copy import deepcopy
 from json import JSONDecodeError
 from uuid import uuid4
 from config import (
+    DEFAULT_MODEL,
+    SKILLS_DIR,
     DANGEROUS_SHELL_PATTERNS,
     SHELL_TIMEOUT_SECONDS,
     SUBAGENT_MAX_TURNS,
-    SUBAGENT_MODEL,
     TOOL_OUTPUT_CHAR_LIMIT,
     build_client,
     build_subagent_system,
 )
 from utils import safe_path, extract_response_text, _read_text_with_fallback
 from log import append_session_log, event_to_dict
-from terminal import print_status, print_todo_state
+from terminal import print_skill_state, print_status, print_todo_state
 
-MODEL = SUBAGENT_MODEL
+MODEL = DEFAULT_MODEL
 SUBAGENT_SYSTEM = build_subagent_system()
 client = build_client()
 
@@ -26,6 +30,7 @@ TOOL_HANDLERS = {
     "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
     "edit_file":  lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),
     "todo":       lambda **kw: TODO.update(kw["items"]),
+    "load_skill": lambda **kw: SKILL_REGISTRY.load_full_text(kw["name"]),
 }
 
 TOOLS = [
@@ -105,12 +110,22 @@ TOOLS = [
                             "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
                         },
                         "required": ["id", "text", "status"],
-                        "additionalProperties": False,
                     },
                 },
             },
             "required": ["items"],
-            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "load_skill",
+        "description": "Load the full body of a named skill into the current context.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+            },
+            "required": ["name"],
         },
     },
 ]
@@ -416,5 +431,96 @@ def run_tool_call(block, log_path: str | None, parent_conversation: list | None 
                     },
                     log_path,
                 )
+        elif block.name == "load_skill":
+            skill_name = args.get("name", "").strip()
+            manifest = SKILL_REGISTRY.get_manifest(skill_name)
+            ok = not output.startswith("Error:")
+            if ok and manifest:
+                print_skill_state(manifest.name, manifest.description, str(manifest.path))
+            else:
+                print_status(output, "31")
+            if log_path:
+                append_session_log(
+                    "skill_loaded",
+                    {
+                        "name": skill_name,
+                        "ok": ok,
+                        "path": str(manifest.path) if manifest else None,
+                        "description": manifest.description if manifest else None,
+                    },
+                    log_path,
+                )
 
     return output
+
+
+@dataclass
+class SkillManifest:
+    name: str
+    description: str
+    path: Path
+
+@dataclass
+class SkillDocument:
+    manifest: SkillManifest
+    body: str
+
+class SkillRegistry:
+    def __init__(self, skills_dir: Path):
+        self.skills_dir = skills_dir
+        self.documents: dict[str, SkillDocument] = {}
+        self._load_all()
+
+    def _load_all(self) -> None:
+        if not self.skills_dir.exists():
+            return
+
+        for path in sorted(self.skills_dir.rglob("SKILL.md")):
+            meta, body = self._parse_frontmatter(_read_text_with_fallback(path))
+            name = meta.get("name", path.parent.name)
+            description = meta.get("description", "No description")
+            manifest = SkillManifest(name=name, description=description, path=path)
+            self.documents[name] = SkillDocument(manifest=manifest, body=body.strip())
+
+    def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
+        match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
+        if not match:
+            return {}, text
+
+        meta = {}
+        for line in match.group(1).strip().splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            meta[key.strip()] = value.strip().strip("\"'")
+        return meta, match.group(2)
+
+    def count(self) -> int:
+        return len(self.documents)
+
+    def get_manifest(self, name: str) -> SkillManifest | None:
+        document = self.documents.get(name)
+        return document.manifest if document else None
+
+    def describe_available(self) -> str:
+        if not self.documents:
+            return "(no skills available)"
+        lines = []
+        for name in sorted(self.documents):
+            manifest = self.documents[name].manifest
+            lines.append(f"- {manifest.name}: {manifest.description}")
+        return "\n".join(lines)
+
+    def load_full_text(self, name: str) -> str:
+        document = self.documents.get(name)
+        if not document:
+            known = ", ".join(sorted(self.documents)) or "(none)"
+            return f"Error: Unknown skill '{name}'. Available skills: {known}"
+
+        return (
+            f"<skill name=\"{document.manifest.name}\">\n"
+            f"{document.body}\n"
+            "</skill>"
+        )
+
+SKILL_REGISTRY = SkillRegistry(SKILLS_DIR)

@@ -30,3 +30,6 @@ logs/
 # Other
 .openclaude-profile.json
 workspaceforagent/
+AGENTS.md
+tests/.pytest_cache/
+tests/pytest-cache-files-*/

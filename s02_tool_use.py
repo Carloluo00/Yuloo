@@ -1,10 +1,10 @@
 import json
-from config import S02_MODEL, build_client, build_s02_system
+from config import DEFAULT_MODEL, build_client, build_s02_system
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
 from tools import TOOLS, TOOL_HANDLERS
 
-MODEL = S02_MODEL
+MODEL = DEFAULT_MODEL
 SYSTEM = build_s02_system()
 client = build_client()
 
