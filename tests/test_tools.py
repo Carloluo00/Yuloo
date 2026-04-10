@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import config
 import tools
@@ -48,6 +49,46 @@ class TodoToolTests(unittest.TestCase):
             "todo.items must be a JSON array of todo objects, got dict",
         ):
             self.manager.update({"id": "1", "text": "first", "status": "pending"})
+
+    def test_maybe_add_todo_reminder_injects_message_and_resets_counter(self):
+        conversation = [{"role": "user", "content": "finish task"}]
+
+        with patch.object(tools, "append_session_log") as log_event, patch.object(tools, "print_status") as show_status:
+            rounds = tools.maybe_add_todo_reminder(
+                conversation,
+                rounds_since_todo=2,
+                used_todo=False,
+                log_path="logs/test.jsonl",
+                reminder_interval=3,
+                reminder_message="Reminder text",
+            )
+
+        self.assertEqual(rounds, 0)
+        self.assertEqual(conversation[-1], {"role": "user", "content": "Reminder text"})
+        show_status.assert_called_once_with("Injected todo reminder for the agent.", "33")
+        log_event.assert_called_once_with(
+            "todo_reminder",
+            {"message": "Reminder text", "rounds_since_todo": 3},
+            "logs/test.jsonl",
+        )
+
+    def test_maybe_add_todo_reminder_skips_injection_when_todo_was_used(self):
+        conversation = [{"role": "user", "content": "finish task"}]
+
+        with patch.object(tools, "append_session_log") as log_event, patch.object(tools, "print_status") as show_status:
+            rounds = tools.maybe_add_todo_reminder(
+                conversation,
+                rounds_since_todo=2,
+                used_todo=True,
+                log_path="logs/test.jsonl",
+                reminder_interval=3,
+                reminder_message="Reminder text",
+            )
+
+        self.assertEqual(rounds, 0)
+        self.assertEqual(len(conversation), 1)
+        show_status.assert_not_called()
+        log_event.assert_not_called()
 
 
 if __name__ == "__main__":

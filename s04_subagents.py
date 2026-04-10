@@ -1,4 +1,3 @@
-import json
 from config import (
     S04_MODEL,
     TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
@@ -7,17 +6,14 @@ from config import (
     build_s04_system,
 )
 from log import append_session_log, event_to_dict
-from terminal import print_assistant_reply, print_status, print_todo_state
-from tools import TOOLS, TOOL_HANDLERS, PARENT_TOOLS, run_tool_call
+from terminal import print_assistant_reply, print_status
+from tools import PARENT_TOOLS, maybe_add_todo_reminder, run_tool_call
 
 MODEL = S04_MODEL
 TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
 TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
 SYSTEM = build_s04_system()
 client = build_client()
-
-
-
 
 
 def agent_loop(conversation: list, render_final: bool = True, log_path: str | None = None):
@@ -81,16 +77,12 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
                 print_assistant_reply(response.output_text)
             return response.output_text
 
-        rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
-        if rounds_since_todo >= TODO_REMINDER_INTERVAL:
-            conversation.append({"role": "user", "content": TODO_REMINDER_MESSAGE})
-            print_status("Injected todo reminder for the agent.", "33")
-            if log_path:
-                append_session_log(
-                    "todo_reminder",
-                    {"message": TODO_REMINDER_MESSAGE, "rounds_since_todo": rounds_since_todo},
-                    log_path,
-                )
-            rounds_since_todo = 0
-
+        rounds_since_todo = maybe_add_todo_reminder(
+            conversation,
+            rounds_since_todo,
+            used_todo,
+            log_path,
+            TODO_REMINDER_INTERVAL,
+            TODO_REMINDER_MESSAGE,
+        )
 

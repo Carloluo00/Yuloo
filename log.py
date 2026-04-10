@@ -2,9 +2,9 @@ from datetime import datetime
 import json
 import os
 
-from config import LOG_DIR
+from config import LOG_DIR as CONFIG_LOG_DIR
 
-LOG_DIR = str(LOG_DIR)
+DEFAULT_LOG_DIR = str(CONFIG_LOG_DIR)
 
 
 def append_session_log(event: str, payload: dict, log_path: str):
@@ -35,7 +35,7 @@ def event_to_dict(event) -> dict:
 def create_session_log_file(
     model: str = "unknown",
     cwd: str | None = None,
-    log_dir: str = LOG_DIR,
+    log_dir: str = DEFAULT_LOG_DIR,
     session_label: str = "session",
 ) -> str:
     os.makedirs(log_dir, exist_ok=True)

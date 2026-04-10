@@ -12,7 +12,7 @@ from config import (
     build_client,
     build_subagent_system,
 )
-from utils import safe_path
+from utils import safe_path, extract_response_text, _read_text_with_fallback
 from log import append_session_log, event_to_dict
 from terminal import print_status, print_todo_state
 
@@ -131,6 +131,9 @@ PARENT_TOOLS = TOOLS + [
     },
 ]
 
+
+
+
 def run_bash(command: str) -> str:
     if any(item in command for item in DANGEROUS_SHELL_PATTERNS):
         return "Error: Dangerous command blocked."
@@ -152,16 +155,13 @@ def run_bash(command: str) -> str:
 def run_read(path: str, limit: int = None) -> str:
     try:
         p = safe_path(path)
-        try:
-            text = p.read_text(encoding="utf-8") # 优先使用 utf-8
-        except UnicodeDecodeError:
-            text = p.read_text(encoding="gbk", errors="replace") # 兼容一些非 utf-8 文件（如 Windows 常见编码）
+        text = _read_text_with_fallback(p)
         lines = text.splitlines()
         if limit and len(lines) > limit:
             lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
         return "\n".join(lines)[:TOOL_OUTPUT_CHAR_LIMIT]
-    except Exception as e:
-        return f"Error: {e}"
+    except Exception as exc:
+        return f"Error: {exc}"
 
 def run_write(path: str, content: str) -> str:
     try:
@@ -169,8 +169,8 @@ def run_write(path: str, content: str) -> str:
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(content)
         return f"Wrote {len(content)} bytes to {path}"
-    except Exception as e:
-        return f"Error: {e}"
+    except Exception as exc:
+        return f"Error: {exc}"
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
@@ -180,8 +180,8 @@ def run_edit(path: str, old_text: str, new_text: str) -> str:
             return f"Error: Text not found in {path}"
         fp.write_text(content.replace(old_text, new_text, 1))
         return f"Edited {path}"
-    except Exception as e:
-        return f"Error: {e}"
+    except Exception as exc:
+        return f"Error: {exc}"
     
 class TodoManager:
     def __init__(self):
@@ -246,24 +246,30 @@ class TodoManager:
 
 TODO = TodoManager()
 
-def extract_response_text(response) -> str:
-    output_text = getattr(response, "output_text", "")
-    if output_text:
-        return output_text
+def maybe_add_todo_reminder(
+    conversation: list,
+    rounds_since_todo: int,
+    used_todo: bool,
+    log_path: str | None,
+    reminder_interval: int,
+    reminder_message: str,
+) -> int:
+    rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
+    if rounds_since_todo < reminder_interval:
+        return rounds_since_todo
 
-    parts = []
-    for block in getattr(response, "output", []):
-        if hasattr(block, "text"):
-            parts.append(block.text)
-            continue
-        content = getattr(block, "content", None)
-        if not isinstance(content, list):
-            continue
-        for item in content:
-            text = getattr(item, "text", "")
-            if text:
-                parts.append(text)
-    return "".join(parts)
+    conversation.append({"role": "user", "content": reminder_message})
+    print_status("Injected todo reminder for the agent.", "33")
+    if log_path:
+        append_session_log(
+            "todo_reminder",
+            {"message": reminder_message, "rounds_since_todo": rounds_since_todo},
+            log_path,
+        )
+    return 0
+
+
+
 
 
 def run_subagent(

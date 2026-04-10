@@ -1,4 +1,3 @@
-import json
 from config import (
     S03_MODEL,
     TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
@@ -7,8 +6,8 @@ from config import (
     build_s03_system,
 )
 from log import append_session_log, event_to_dict
-from terminal import print_assistant_reply, print_status, print_todo_state
-from tools import TOOLS, TOOL_HANDLERS
+from terminal import print_assistant_reply, print_status
+from tools import TOOLS, maybe_add_todo_reminder, run_tool_call as shared_run_tool_call
 
 MODEL = S03_MODEL
 TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
@@ -18,42 +17,7 @@ client = build_client()
 
 
 def run_tool_call(block, log_path: str | None):
-    args = json.loads(block.arguments)
-    print_status(f"Running {block.name}: {args}", "90")
-
-    handler = TOOL_HANDLERS.get(block.name)
-    if handler is None:
-        error = f"Unknown tool '{block.name}'"
-        output = f"Error: {error}"
-        print_status(output, "31")
-        if log_path:
-            append_session_log("tool_error", {"name": block.name, "args": args, "error": error}, log_path)
-        return output
-
-    try:
-        output = handler(**args)
-    except Exception as exc:
-        output = f"Error: {exc}"
-        print_status(f"{block.name} failed: {exc}", "31")
-        if log_path:
-            append_session_log("tool_error", {"name": block.name, "args": args, "error": str(exc)}, log_path)
-
-    if block.name == "todo":
-        print_todo_state(output)
-        if log_path:
-            append_session_log(
-                "todo_updated",
-                {
-                    "items": args.get("items", []),
-                    "output": output,
-                    "ok": not output.startswith("Error:"),
-                },
-                log_path,
-            )
-
-    return output
-
-
+    return shared_run_tool_call(block, log_path)
 
 
 def agent_loop(conversation: list, render_final: bool = True, log_path: str | None = None):
@@ -116,16 +80,12 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
                 print_assistant_reply(response.output_text)
             return response.output_text
 
-        rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
-        if rounds_since_todo >= TODO_REMINDER_INTERVAL:
-            conversation.append({"role": "user", "content": TODO_REMINDER_MESSAGE})
-            print_status("Injected todo reminder for the agent.", "33")
-            if log_path:
-                append_session_log(
-                    "todo_reminder",
-                    {"message": TODO_REMINDER_MESSAGE, "rounds_since_todo": rounds_since_todo},
-                    log_path,
-                )
-            rounds_since_todo = 0
-
+        rounds_since_todo = maybe_add_todo_reminder(
+            conversation,
+            rounds_since_todo,
+            used_todo,
+            log_path,
+            TODO_REMINDER_INTERVAL,
+            TODO_REMINDER_MESSAGE,
+        )
 

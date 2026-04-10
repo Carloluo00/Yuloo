@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import s03_todo_write as module
+import tools
 
 
 def make_block(block_type: str, **kwargs):
@@ -46,8 +47,10 @@ class AgentLoopTests(unittest.TestCase):
 
         with patch.object(module, "client", client), patch.object(module, "print_status"), patch.object(
             module, "print_assistant_reply"
-        ), patch.object(module, "append_session_log"), patch.dict(
-            module.TOOL_HANDLERS, {"bash": lambda command: f"ran {command}"}, clear=False
+        ), patch.object(module, "append_session_log"), patch.object(tools, "print_status"), patch.object(
+            tools, "append_session_log"
+        ), patch.dict(
+            tools.TOOL_HANDLERS, {"bash": lambda command: f"ran {command}"}, clear=False
         ):
             result = module.agent_loop(conversation, render_final=False, log_path="logs/test.jsonl")
 
@@ -88,7 +91,9 @@ class AgentLoopTests(unittest.TestCase):
 
         with patch.object(module, "client", client), patch.object(module, "print_status"), patch.object(
             module, "print_assistant_reply"
-        ), patch.object(module, "append_session_log", side_effect=fake_log), patch.object(module, "print_todo_state"):
+        ), patch.object(module, "append_session_log", side_effect=fake_log), patch.object(
+            tools, "append_session_log", side_effect=fake_log
+        ), patch.object(tools, "print_status"), patch.object(tools, "print_todo_state"):
             result = module.agent_loop(conversation, render_final=False, log_path="logs/test.jsonl")
 
         self.assertEqual(result, "done")
