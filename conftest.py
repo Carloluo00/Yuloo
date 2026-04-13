@@ -11,6 +11,7 @@ TESTS_DIR = ROOT_DIR / "tests"
 
 
 def cleanup_pytest_artifacts(root: Path) -> None:
+    # Tests are expected to leave the workspace clean between runs.
     targets = [root / ".pytest_cache", *root.glob("pytest-cache-files-*")]
     for target in targets:
         shutil.rmtree(target, ignore_errors=True)

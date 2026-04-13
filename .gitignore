@@ -23,6 +23,8 @@ var/
 # Logs
 logs/
 .omx/
+.transcripts/
+.task_outputs/
 
 # IDE
 .vscode/

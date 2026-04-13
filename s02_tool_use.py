@@ -65,6 +65,7 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             if log_path:
                 append_session_log("tool_result", tool_result, log_path)
 
+        # Tool outputs become conversation items; otherwise the model would lose their results.
         conversation += results
 
         if not results:

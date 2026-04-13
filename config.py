@@ -18,7 +18,12 @@ TODO_REMINDER_MESSAGE = "Reminder: update your todo list if task status changed.
 
 SUBAGENT_MAX_TURNS = 30
 SHELL_TIMEOUT_SECONDS = 120
+KEEP_RECENT_TOOL_RESULTS = 3
 TOOL_OUTPUT_CHAR_LIMIT = 50000
+PERSIST_THRESHOLD = 30000
+PREVIEW_CHARS = 2000
+TRANSCRIPT_DIR = WORKDIR / ".transcripts"
+TOOL_RESULTS_DIR = WORKDIR / ".task_outputs" / "tool-results"
 DANGEROUS_SHELL_PATTERNS = ("rm -rf /", "sudo", "shutdown", "reboot", "> /dev/")
 
 
@@ -63,4 +68,13 @@ def build_s05_system():
     return (
         f"You are a coding agent at {WORKDIR}. "
         "Use load_skill when a task needs specialized instructions before you act."
+    )
+
+
+def build_s06_system(workdir: Path = WORKDIR) -> str:
+    return (
+        f"You are a coding agent at {workdir}. "
+        "Use load_skill when a task needs specialized instructions before you act. "
+        "Keep long-running conversations compact by persisting oversized tool output, "
+        "compacting stale tool results, and summarizing history before the context window fills up."
     )

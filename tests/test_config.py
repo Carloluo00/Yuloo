@@ -4,6 +4,7 @@ import main
 import s03_todo_write
 import s04_subagents
 import s05_skill_loading
+import s06_compact
 import tools
 
 
@@ -14,10 +15,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(s03_todo_write.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s04_subagents.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s05_skill_loading.MODEL, config.DEFAULT_MODEL)
+        self.assertEqual(s06_compact.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(tools.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(main.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s03_todo_write.TODO_REMINDER_INTERVAL, config.TODO_REMINDER_INTERVAL)
         self.assertEqual(s04_subagents.TODO_REMINDER_MESSAGE, config.TODO_REMINDER_MESSAGE)
+        self.assertEqual(s06_compact.TODO_REMINDER_MESSAGE, config.TODO_REMINDER_MESSAGE)
 
     def test_system_prompts_are_built_from_config_helpers(self):
         import config
@@ -38,6 +41,10 @@ class ConfigTests(unittest.TestCase):
         self.assertIn(
             "Use load_skill when a task needs specialized instructions",
             config.build_s05_system(),
+        )
+        self.assertIn(
+            "Keep long-running conversations compact",
+            config.build_s06_system(workdir),
         )
 
 

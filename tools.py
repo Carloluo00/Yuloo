@@ -1,18 +1,25 @@
 import json
 import subprocess
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from copy import deepcopy
 from json import JSONDecodeError
 from uuid import uuid4
 from config import (
     DEFAULT_MODEL,
+    WORKDIR,
     SKILLS_DIR,
     DANGEROUS_SHELL_PATTERNS,
     SHELL_TIMEOUT_SECONDS,
     SUBAGENT_MAX_TURNS,
+    KEEP_RECENT_TOOL_RESULTS,
     TOOL_OUTPUT_CHAR_LIMIT,
+    PERSIST_THRESHOLD,
+    PREVIEW_CHARS,
+    TRANSCRIPT_DIR,
+    TOOL_RESULTS_DIR,
     build_client,
     build_subagent_system,
 )
@@ -156,6 +163,7 @@ def run_bash(command: str) -> str:
         result = subprocess.run(
             command,
             shell=True,
+            cwd=WORKDIR,
             capture_output=True,
             text=True,
             timeout=SHELL_TIMEOUT_SECONDS,
@@ -203,6 +211,7 @@ class TodoManager:
         self.items = []
 
     def _normalize_items(self, items) -> list[dict]:
+        # Models sometimes stringify arrays; accept that recovery path but keep the schema strict.
         if isinstance(items, str):
             try:
                 items = json.loads(items)
@@ -253,7 +262,7 @@ class TodoManager:
             return "No todos."
         lines = []
         for item in self.items:
-            marker = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}[item["status"]]
+            marker = {"pending": "[ ]", "in_progress": "[>]", "completed": "[✓]"}[item["status"]]
             lines.append(f"{marker} #{item['id']}: {item['text']}")
         done = sum(1 for t in self.items if t["status"] == "completed")
         lines.append(f"\n({done}/{len(self.items)} completed)")
@@ -294,6 +303,7 @@ def run_subagent(
     description: str | None = None,
     parent_conversation: list | None = None,
 ) -> str:
+    # Work on a snapshot so subagent turns cannot mutate the parent transcript in place.
     sub_conversation = deepcopy(parent_conversation) if parent_conversation else []
     sub_conversation.append({"role": "user", "content": prompt})
     subagent_id = f"subagent_{uuid4().hex[:8]}"
@@ -389,7 +399,7 @@ def run_tool_call(block, log_path: str | None, parent_conversation: list | None 
     args = json.loads(block.arguments)
     print_status(f"Running {block.name}: {args}", "90")
 
-    # run subagents
+    # task is the only tool that delegates to another model loop instead of a local handler.
     if block.name == "task":
         desc = args.get("description", "subtask")
         prompt = args.get("prompt", "")
@@ -483,6 +493,7 @@ class SkillRegistry:
             self.documents[name] = SkillDocument(manifest=manifest, body=body.strip())
 
     def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
+        # SKILL.md metadata is intentionally tiny, so a permissive regex parser is enough here.
         match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
         if not match:
             return {}, text
@@ -524,3 +535,145 @@ class SkillRegistry:
         )
 
 SKILL_REGISTRY = SkillRegistry(SKILLS_DIR)
+
+
+CONTEXT_CHAR_THRESHOLD = 80_000
+EARLIER_TOOL_RESULT_PLACEHOLDER = (
+    "[Earlier tool result compacted. Re-run the tool if you need full detail.]"
+)
+
+
+@dataclass
+class CompactState:
+    has_compacted: bool = False
+    last_summary: str = ""
+    recent_files: list[str] = field(default_factory=list)
+
+def estimate_context_size(messages: list) -> int:
+    return len(json.dumps(messages, default=str, ensure_ascii=False))
+
+def track_recent_file(state: CompactState, path: str) -> None:
+    if path in state.recent_files:
+        state.recent_files.remove(path)
+    state.recent_files.append(path)
+    if len(state.recent_files) > 5:
+        state.recent_files[:] = state.recent_files[-5:]
+
+def persist_large_output(tool_use_id: str, output: str) -> str:
+    if not isinstance(output, str) or len(output) <= PERSIST_THRESHOLD:
+        return output
+
+    TOOL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    stored_path = TOOL_RESULTS_DIR / f"{tool_use_id}.txt"
+    if not stored_path.exists():
+        stored_path.write_text(output, encoding="utf-8")
+
+    preview = output[:PREVIEW_CHARS]
+    try:
+        rel_path = stored_path.relative_to(WORKDIR)
+    except ValueError:
+        rel_path = stored_path
+    return (
+        "<persisted-output>\n"
+        f"Full output saved to: {rel_path}\n"
+        "Preview:\n"
+        f"{preview}\n"
+        "</persisted-output>"
+    )
+
+def collect_tool_result_blocks(conversation: list) -> list[int]:
+    blocks = []
+    for block_index, block in enumerate(conversation):
+        block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+        if block_type == "function_call_output":
+            blocks.append(block_index)
+    return blocks
+
+def micro_compact(conversation: list) -> list:
+    tool_results = collect_tool_result_blocks(conversation)
+    if len(tool_results) <= KEEP_RECENT_TOOL_RESULTS:
+        return conversation
+
+    for idx in tool_results[:-KEEP_RECENT_TOOL_RESULTS]:
+        block = conversation[idx]
+        output = block.get("output", "") if isinstance(block, dict) else getattr(block, "output", "")
+        if not isinstance(output, str) or len(output) <= 120 or output == EARLIER_TOOL_RESULT_PLACEHOLDER:
+            continue
+        if isinstance(block, dict):
+            block["output"] = EARLIER_TOOL_RESULT_PLACEHOLDER
+        else:
+            setattr(block, "output", EARLIER_TOOL_RESULT_PLACEHOLDER)
+    return conversation
+
+def write_transcript(conversation: list) -> Path:
+    TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
+    path = TRANSCRIPT_DIR / f"transcript_{int(time.time())}.jsonl"
+    with path.open("w", encoding="utf-8") as handle:
+        for message in conversation:
+            handle.write(json.dumps(message, default=str, ensure_ascii=False) + "\n")
+    return path
+
+def summarize_history(conversation: list) -> str:
+    conversation_str = json.dumps(conversation, default=str, ensure_ascii=False)[:80_000]
+    prompt = (
+        "Summarize this coding-agent conversation so work can continue.\n"
+        "Preserve:\n"
+        "1. The current goal\n"
+        "2. Important findings and decisions\n"
+        "3. Files read or changed\n"
+        "4. Remaining work\n"
+        "5. User constraints and preferences\n"
+        "Be compact but concrete.\n\n"
+        f"{conversation_str}"
+    )
+    response = client.responses.create(
+        model=MODEL,
+        input=[{"role": "user", "content": prompt}],
+        max_output_tokens=2000,
+    )
+    return extract_response_text(response).strip()
+
+def compact_history(conversation: list, state: CompactState, focus: str | None = None) -> list:
+    transcript_path = write_transcript(conversation)
+    print_status(f"Context compacted; transcript saved to {transcript_path}", "33")
+
+    summary = summarize_history(conversation)
+    if focus:
+        summary += f"\n\nFocus to preserve next: {focus}"
+    if state.recent_files:
+        recent_lines = "\n".join(f"- {path}" for path in state.recent_files)
+        summary += f"\n\nRecent files to reopen if needed:\n{recent_lines}"
+
+    state.has_compacted = True
+    state.last_summary = summary
+
+    return [{
+        "role": "user",
+        "content": (
+            "This conversation was compacted so the agent can continue working.\n\n"
+            f"{summary}"
+        ),
+    }]
+
+def maybe_compact_history(
+    conversation: list,
+    state: CompactState,
+    log_path: str | None = None,
+    focus: str | None = None,
+) -> list:
+    # Full compaction is a last resort; keep the raw transcript until it is actually large.
+    if estimate_context_size(conversation) <= CONTEXT_CHAR_THRESHOLD:
+        return conversation
+
+    compacted = compact_history(conversation, state, focus=focus)
+    if log_path:
+        append_session_log(
+            "conversation_compacted",
+            {
+                "message_count_before": len(conversation),
+                "message_count_after": len(compacted),
+                "summary": state.last_summary,
+            },
+            log_path,
+        )
+    return compacted

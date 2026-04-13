@@ -17,21 +17,27 @@ app. Each stage introduces one new capability and keeps the code readable:
 - `s02`: local tool use for shell and file operations
 - `s03`: todo-based planning and progress tracking
 - `s04`: parent/subagent delegation with a `task` tool
+- `s05`: skill discovery and on-demand `load_skill`
+- `s06`: context compaction with persisted oversized tool output and transcript summaries
 
-The current CLI entrypoint in `main.py` uses the `s04` flow. The latest version
-adds centralized runtime configuration, subagent lifecycle logging, and
-regression tests that protect the newer delegation behavior.
+The current CLI entrypoint in `main.py` uses the `s06` flow. The latest version
+adds centralized runtime configuration, skill loading, context compaction,
+preview-oriented terminal rendering, and regression tests that protect the newer
+behavior.
 
 ## Highlights
 
 - Small, readable Python codebase for studying agent architecture
 - Shared `config.py` for models, client setup, prompt builders, and runtime limits
-- Tool registry with `bash`, `read_file`, `write_file`, `edit_file`, `todo`, and `task`
+- Tool registry with `bash`, `read_file`, `write_file`, `edit_file`, `todo`, `load_skill`, and `task`
 - Todo reminders that nudge the agent to keep task state updated
 - Subagents that inherit parent conversation context and share filesystem access
+- Skills that can be discovered from the prompt and loaded on demand
+- Large tool output persisted to disk with compact previews kept in context
+- Terminal output trimmed to short previews while full details stay in logs
 - JSONL session logs for both parent-agent activity and delegated subagent traces
 - Safety checks for dangerous shell commands and workspace path escapes
-- Lightweight regression tests for config, todo flow, and subagent logging
+- Lightweight regression tests for config, todo flow, subagent logging, compaction, and terminal rendering
 
 ## Project Structure
 
@@ -41,23 +47,31 @@ regression tests that protect the newer delegation behavior.
 - `s02_tool_use.py`: adds file and shell tools
 - `s03_todo_write.py`: adds todo planning and reminder injection
 - `s04_subagents.py`: adds parent/subagent delegation
+- `s05_skill_loading.py`: adds skill discovery and `load_skill`
+- `s06_compact.py`: adds tool-output persistence and context compaction
 - `tools.py`: shared tool schema, handlers, and subagent runtime
 - `terminal.py`: terminal rendering helpers
 - `log.py`: JSONL session logging helpers
 - `utils.py`: safe workspace path handling
+- `tests/test_main.py`: CLI runtime wiring regression tests
+- `tests/test_tools.py`: shared tool and todo rendering regression tests
 - `tests/test_s03_todo_write.py`: todo flow regression tests
 - `tests/test_s04_subagent_logging.py`: subagent logging regression tests
+- `tests/test_s06_compact.py`: compaction regression tests
+- `tests/test_terminal.py`: terminal history and preview regression tests
 - `tests/test_config.py`: shared-config regression tests
 
 ## Current Runtime Model
 
-`main.py` currently launches the `s04` agent loop, which can:
+`main.py` currently launches the `s06` agent loop, which can:
 
 1. read a user request
 2. call local tools directly
 3. manage todos for multi-step work
 4. delegate bounded subtasks to subagents
-5. log both parent and subagent execution traces
+5. discover and load local skills
+6. persist oversized tool output and compact long conversations
+7. log both parent and subagent execution traces
 
 Subagents inherit the parent conversation snapshot, then receive the delegated
 task prompt as a new user message. They still operate in the same workspace and
@@ -73,6 +87,7 @@ giving workers the context they need.
 | `write_file` | Write a file |
 | `edit_file` | Replace exact text in a file |
 | `todo` | Track short task lists with status |
+| `load_skill` | Load a named `SKILL.md` into the current context |
 | `task` | Spawn a subagent for delegated work |
 
 ## Logging
@@ -83,10 +98,13 @@ Session logs are written as JSONL files under `logs/`. The current runtime logs:
 - assistant response blocks
 - tool results and tool errors
 - todo updates and reminder injections
+- skill load events
 - subagent start, per-turn responses, tool results, and finish summaries
+- context compaction events when the transcript is summarized
 
 This makes it practical to inspect not only what the top-level agent decided,
-but also what delegated workers actually did.
+but also what delegated workers actually did. The terminal now prints previews;
+the logs retain the full detail.
 
 ## Safety Notes
 
@@ -94,7 +112,9 @@ but also what delegated workers actually did.
   are blocked before execution.
 - File operations pass through `safe_path()` to prevent escaping the workspace.
 - Shell commands time out after the configured limit.
-- Long tool output is truncated before being returned to the model.
+- Long tool output is persisted to `.task_outputs/tool-results/` and replaced
+  with a compact preview in the conversation.
+- Full transcript snapshots are written to `.transcripts/` when history is compacted.
 
 ## Run Locally
 
@@ -120,8 +140,9 @@ python main.py
 ## CLI Commands
 
 - `/help`: show command help
+- `/skills`: show available skills
 - `/clear`: clear the current conversation context
-- `/history`: show recent user messages
+- `/history`: show conversation history, including assistant replies and tool records
 - `q`, `quit`, `exit`: leave the program
 
 ## Validation
@@ -130,13 +151,13 @@ Current validation commands:
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
-python -m py_compile config.py log.py main.py s01_agent_loop.py s02_tool_use.py s03_todo_write.py s04_subagents.py terminal.py tools.py utils.py tests/test_config.py tests/test_s03_todo_write.py tests/test_s04_subagent_logging.py
+python -m py_compile config.py conftest.py log.py main.py s01_agent_loop.py s02_tool_use.py s03_todo_write.py s04_subagents.py s05_skill_loading.py s06_compact.py terminal.py tools.py utils.py tests/test_config.py tests/test_main.py tests/test_pytest_cache_policy.py tests/test_s03_todo_write.py tests/test_s04_subagent_logging.py tests/test_s06_compact.py tests/test_terminal.py tests/test_tools.py
 ```
 
 ## Roadmap
 
-- Keep extending the staged learning path beyond `s04`
-- Improve delegation heuristics and richer subagent coordination
+- Keep extending the staged learning path beyond `s06`
+- Improve compaction heuristics and richer delegation coordination
 - Expand test coverage for earlier tutorial stages
 - Add more documentation around prompt design and runtime traces
 

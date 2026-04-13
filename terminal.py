@@ -1,16 +1,27 @@
+import json
 import os
+
+TERMINAL_PREVIEW_CHARS = 280
 
 
 def color(text: str, code: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
+def _preview_text(text: str, limit: int | None = None) -> str:
+    value = (text or "").strip()
+    max_chars = TERMINAL_PREVIEW_CHARS if limit is None else limit
+    if len(value) <= max_chars:
+        return value
+    return f"{value[:max_chars]}..."
+
+
 def print_status(message: str, code: str = "90"):
-    print(f"{color('[status]', code)} {message}")
+    print(f"{color('[status]', code)} {_preview_text(message)}")
 
 
 def print_assistant_reply(reply: str):
-    text = (reply or "").strip()
+    text = _preview_text(reply)
     if not text:
         return
 
@@ -20,7 +31,7 @@ def print_assistant_reply(reply: str):
 
 
 def print_todo_state(todo_text: str):
-    text = (todo_text or "").strip()
+    text = _preview_text(todo_text)
     if not text:
         return
 
@@ -31,15 +42,15 @@ def print_todo_state(todo_text: str):
 
 def print_skill_state(name: str, description: str | None = None, path: str | None = None):
     print(color("skill loaded", "34"))
-    print(f"  name: {name}")
+    print(f"  name: {_preview_text(name)}")
     if description:
-        print(f"  desc: {description}")
+        print(f"  desc: {_preview_text(description)}")
     if path:
-        print(f"  path: {path}")
+        print(f"  path: {_preview_text(path)}")
 
 
 def print_skills(skills_text: str):
-    text = (skills_text or "").strip()
+    text = _preview_text(skills_text)
     if not text:
         print_status("No skills available.", "33")
         return
@@ -74,29 +85,82 @@ def print_help(log_path: str, skills_available: int | None = None):
     print("  /help    show available commands")
     print("  /skills  show available skills")
     print("  /clear   clear current conversation context")
-    print("  /history show recent user messages")
+    print("  /history show conversation history")
     print("  exit     quit the program")
     if skills_available is not None:
         print(f"  skills:  {skills_available} available")
     print(f"  log file {log_path}")
 
 
-def print_history(conversation: list):
-    user_messages = []
-    for item in conversation:
-        if isinstance(item, dict) and item.get("role") == "user":
-            content = item.get("content")
-            if isinstance(content, str) and content.strip():
-                user_messages.append(content.strip())
+def _history_text(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if not isinstance(value, list):
+        return ""
 
-    if not user_messages:
-        print_status("No user messages in history yet.", "33")
+    parts = []
+    for item in value:
+        if isinstance(item, dict):
+            text = item.get("text", "")
+        else:
+            text = getattr(item, "text", "")
+        if isinstance(text, str) and text.strip():
+            parts.append(text.strip())
+    return "\n".join(parts)
+
+
+def _history_entries(conversation: list) -> list[tuple[str, str]]:
+    entries = []
+    tool_names: dict[str, str] = {}
+
+    for item in conversation:
+        if not isinstance(item, dict):
+            continue
+
+        role = item.get("role")
+        if role in {"user", "assistant", "system"}:
+            text = _history_text(item.get("content"))
+            if text:
+                entries.append((role, text))
+                continue
+
+        item_type = item.get("type")
+        if item_type == "message":
+            text = _history_text(item.get("content")) or _history_text(item.get("text"))
+            if text:
+                entries.append((item.get("role", "assistant"), text))
+        elif item_type == "function_call":
+            tool_name = item.get("name", "tool")
+            call_id = item.get("call_id")
+            if isinstance(call_id, str):
+                tool_names[call_id] = tool_name
+            arguments = item.get("arguments", "")
+            if isinstance(arguments, str) and arguments.strip():
+                try:
+                    arguments = json.dumps(json.loads(arguments), ensure_ascii=False)
+                except json.JSONDecodeError:
+                    arguments = arguments.strip()
+                entries.append((f"{tool_name} call", str(arguments)))
+        elif item_type == "function_call_output":
+            output = item.get("output", "")
+            if isinstance(output, str) and output.strip():
+                tool_name = tool_names.get(item.get("call_id"), "tool")
+                entries.append((f"{tool_name} result", output.strip()))
+
+    return entries
+
+
+def print_history(conversation: list):
+    entries = _history_entries(conversation)
+    if not entries:
+        print_status("No conversation history yet.", "33")
         return
 
-    print(color("recent history", "36"))
-    start = max(len(user_messages) - 5, 0)
-    for index, message in enumerate(user_messages[start:], start + 1):
-        print(f"  {index}. {message}")
+    print(color("conversation history", "36"))
+    for index, (label, text) in enumerate(entries, 1):
+        print(f"  {index}. [{label}]")
+        for line in _preview_text(text).splitlines():
+            print(f"     {line}")
 
 
 def clear_screen():

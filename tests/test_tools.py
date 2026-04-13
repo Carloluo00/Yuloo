@@ -68,6 +68,14 @@ class TodoToolTests(unittest.TestCase):
         self.assertIn("[ ] #2: second", output)
         self.assertEqual(len(self.manager.items), 2)
 
+    def test_update_renders_completed_items_with_check_mark(self):
+        output = self.manager.update(
+            [{"id": "1", "text": "first", "status": "completed"}]
+        )
+
+        self.assertIn("[✓] #1: first", output)
+        self.assertNotIn("[x] #1: first", output)
+
     def test_update_rejects_unparseable_string_with_clear_error(self):
         with self.assertRaisesRegex(
             ValueError,

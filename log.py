@@ -19,6 +19,7 @@ def append_session_log(event: str, payload: dict, log_path: str):
 
 
 def event_to_dict(event) -> dict:
+    # Normalize SDK objects in descending order of fidelity before falling back to a string snapshot.
     if isinstance(event, dict):
         return event
     if hasattr(event, "to_dict"):
@@ -43,6 +44,7 @@ def create_session_log_file(
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     log_path = os.path.join(log_dir, f"{session_label}_{session_id}.jsonl")
     current_cwd = cwd or os.getcwd()
+    # Touch the file early so the banner can point at a path that already exists.
     with open(log_path, "a", encoding="utf-8"):
         pass
     payload = {"session_id": session_id, "model": model, "cwd": current_cwd}

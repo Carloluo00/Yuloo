@@ -15,6 +15,7 @@ TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
 RUNTIME_NAME = "s05_skill_loading"
 SESSION_LABEL = "skill_agent_session"
 AVAILABLE_SKILLS_TEXT = SKILL_REGISTRY.describe_available()
+# Expose discoverable skill names in the prompt before the agent decides to load one.
 SYSTEM = f"{build_s05_system()}\n\nAvailable skills:\n{AVAILABLE_SKILLS_TEXT}"
 client = build_client()
 

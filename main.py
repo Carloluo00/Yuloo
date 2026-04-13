@@ -1,12 +1,12 @@
 import os
 
 from log import append_session_log, create_session_log_file
-from s05_skill_loading import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
+from s06_compact import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
 from terminal import print_assistant_reply, print_banner, print_status
 from utils import count_available_skills, handle_builtin_command, is_exit_command
 
 
-PROMPT = "\033[36mskill-agent >> \033[0m"
+PROMPT = "\033[36muser >> \033[0m"
 
 
 def run_cli():
@@ -54,6 +54,7 @@ def run_cli():
             available_skills_text=AVAILABLE_SKILLS_TEXT,
             cwd=os.getcwd(),
         ):
+            # Built-ins are handled locally and should not consume a model turn.
             continue
 
         conversation.append({"role": "user", "content": query})

@@ -74,12 +74,14 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             results.append(tool_result)
             if log_path:
                 append_session_log("tool_result", tool_result, log_path)
+        # Keep tool results in-band so the agent can reason over both work and plan state.
         conversation += results
         if not results:
             if render_final:
                 print_assistant_reply(response.output_text)
             return response.output_text
 
+        # After a few non-todo turns, remind the model to refresh its explicit plan.
         rounds_since_todo = maybe_add_todo_reminder(
             conversation,
             rounds_since_todo,

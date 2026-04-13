@@ -69,6 +69,7 @@ def extract_response_text(response) -> str:
     if output_text:
         return output_text
 
+    # Different SDK objects expose text in different shapes; fall back from direct text to content items.
     parts = []
     for block in getattr(response, "output", []):
         if hasattr(block, "text"):
@@ -87,4 +88,5 @@ def _read_text_with_fallback(path) -> str:
     try:
         return path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
+        # The tutorial targets Windows too, so tolerate legacy local encodings when reading skills/files.
         return path.read_text(encoding="gbk", errors="replace")

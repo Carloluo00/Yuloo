@@ -1,26 +1,49 @@
+import json
+
 from config import (
     DEFAULT_MODEL,
     TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
     TODO_REMINDER_MESSAGE as CONFIG_TODO_REMINDER_MESSAGE,
     build_client,
-    build_s04_system,
+    build_s06_system,
 )
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
-from tools import PARENT_TOOLS, maybe_add_todo_reminder, run_tool_call
+from tools import (
+    SKILL_REGISTRY,
+    CompactState,
+    PARENT_TOOLS,
+    compact_history,
+    maybe_add_todo_reminder,
+    maybe_compact_history,
+    micro_compact,
+    persist_large_output,
+    run_tool_call,
+    track_recent_file,
+)
+from utils import extract_response_text
+
 
 MODEL = DEFAULT_MODEL
 TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
 TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
-SYSTEM = build_s04_system()
+RUNTIME_NAME = "s06_compact"
+SESSION_LABEL = "compact_agent_session"
+AVAILABLE_SKILLS_TEXT = SKILL_REGISTRY.describe_available()
+SYSTEM = f"{build_s06_system()}\n\nAvailable skills:\n{AVAILABLE_SKILLS_TEXT}"
 client = build_client()
 
 
 def agent_loop(conversation: list, render_final: bool = True, log_path: str | None = None):
     print_status(f"Thinking with {MODEL}...", "36")
     rounds_since_todo = 0
+    compact_state = CompactState()
 
     while True:
+        # Trim stale tool chatter before asking the model to spend tokens on it.
+        conversation[:] = micro_compact(conversation)
+        conversation[:] = maybe_compact_history(conversation, compact_state, log_path=log_path)
+
         response = client.responses.create(
             model=MODEL,
             instructions=SYSTEM,
@@ -34,18 +57,19 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             print_status(f"error: {error}", "31")
             return None
 
+        reply_text = extract_response_text(response)
         if response.status == "incomplete":
             details = getattr(response, "incomplete_details", "unknown")
             print_status(f"incomplete: {details}", "33")
             if log_path:
                 append_session_log(
                     "response_incomplete",
-                    {"details": str(details), "output_text": response.output_text},
+                    {"details": str(details), "output_text": reply_text},
                     log_path,
                 )
             if render_final:
-                print_assistant_reply(response.output_text)
-            return response.output_text
+                print_assistant_reply(reply_text)
+            return reply_text
 
         response_blocks = [event_to_dict(block) for block in response.output]
         conversation += response_blocks
@@ -59,12 +83,22 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             if block.type != "function_call":
                 continue
 
-            # Delegated tasks inherit the current transcript snapshot for local context.
+            try:
+                tool_args = json.loads(block.arguments)
+            except json.JSONDecodeError:
+                tool_args = {}
+
+            file_path = tool_args.get("path")
+            if isinstance(file_path, str) and file_path.strip():
+                track_recent_file(compact_state, file_path.strip())
+
             output = run_tool_call(block, log_path, parent_conversation=conversation)
+            # Large tool output is still preserved on disk; only a preview stays in context.
+            persisted_output = persist_large_output(block.call_id, output)
             tool_result = {
                 "type": "function_call_output",
                 "call_id": block.call_id,
-                "output": output,
+                "output": persisted_output,
             }
             if block.name == "todo":
                 used_todo = True
@@ -73,10 +107,11 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
                 append_session_log("tool_result", tool_result, log_path)
 
         conversation += results
+        conversation[:] = micro_compact(conversation)
         if not results:
             if render_final:
-                print_assistant_reply(response.output_text)
-            return response.output_text
+                print_assistant_reply(reply_text)
+            return reply_text
 
         rounds_since_todo = maybe_add_todo_reminder(
             conversation,
@@ -86,4 +121,5 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             TODO_REMINDER_INTERVAL,
             TODO_REMINDER_MESSAGE,
         )
+
 
