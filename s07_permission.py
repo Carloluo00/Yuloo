@@ -1,19 +1,18 @@
 import json
-
 from config import (
     DEFAULT_MODEL,
     TODO_REMINDER_INTERVAL as CONFIG_TODO_REMINDER_INTERVAL,
     TODO_REMINDER_MESSAGE as CONFIG_TODO_REMINDER_MESSAGE,
     build_client,
-    build_s06_system,
+    build_s07_system,
 )
 from log import append_session_log, event_to_dict
 from terminal import print_assistant_reply, print_status
+from permission import PermissionManager
 from tools import (
     SKILL_REGISTRY,
     CompactState,
     PARENT_TOOLS,
-    compact_history,
     maybe_add_todo_reminder,
     maybe_compact_history,
     micro_compact,
@@ -27,17 +26,23 @@ from utils import extract_response_text
 MODEL = DEFAULT_MODEL
 TODO_REMINDER_INTERVAL = CONFIG_TODO_REMINDER_INTERVAL
 TODO_REMINDER_MESSAGE = CONFIG_TODO_REMINDER_MESSAGE
-RUNTIME_NAME = "s06_compact"
-SESSION_LABEL = "compact_agent_session"
+RUNTIME_NAME = "s07_permission"
+SESSION_LABEL = "s07_agent_session"
 AVAILABLE_SKILLS_TEXT = SKILL_REGISTRY.describe_available()
-SYSTEM = f"{build_s06_system()}\n\nAvailable skills:\n{AVAILABLE_SKILLS_TEXT}"
+SYSTEM = f"{build_s07_system()}\n\nAvailable skills:\n{AVAILABLE_SKILLS_TEXT}"
 client = build_client()
 
 
-def agent_loop(conversation: list, render_final: bool = True, log_path: str | None = None):
+def agent_loop(
+        conversation: list, 
+        render_final: bool = True, 
+        log_path: str | None = None,
+        perms: PermissionManager | None = None
+):
     print_status(f"Thinking with {MODEL}...", "36")
     rounds_since_todo = 0
     compact_state = CompactState()
+    perms = perms or PermissionManager()
 
     while True:
         # Trim stale tool chatter before asking the model to spend tokens on it.
@@ -88,11 +93,32 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             except json.JSONDecodeError:
                 tool_args = {}
 
-            file_path = tool_args.get("path")
-            if isinstance(file_path, str) and file_path.strip():
-                track_recent_file(compact_state, file_path.strip())
+            # -- Permission check --
+            decision = perms.check(block.name, tool_args)
+            if log_path:
+                append_session_log(
+                    "permission_decision",
+                    {
+                        "tool": block.name,
+                        "args": tool_args,
+                        "behavior": decision["behavior"],
+                        "reason": decision["reason"],
+                    },
+                    log_path,
+                )
 
-            output = run_tool_call(block, log_path, parent_conversation=conversation)
+            if decision["behavior"] == "deny":
+                output = f"Permission denied: {decision['reason']}"
+                print_status(f"Denied {block.name}: {decision['reason']}", "33")
+            elif decision["behavior"] == "ask":
+                if perms.ask_user(block.name, tool_args):
+                    output = run_tool_call(block, log_path, parent_conversation=conversation)
+                else:
+                    output = f"Permission denied by user for {block.name}"
+                    print_status(f"User denied {block.name}", "33")
+            else:
+                output = run_tool_call(block, log_path, parent_conversation=conversation)
+
             # Large tool output is still preserved on disk; only a preview stays in context.
             persisted_output = persist_large_output(block.call_id, output)
             tool_result = {
@@ -100,6 +126,7 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
                 "call_id": block.call_id,
                 "output": persisted_output,
             }
+            
             if block.name == "todo":
                 used_todo = True
             results.append(tool_result)

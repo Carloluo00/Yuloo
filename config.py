@@ -78,3 +78,13 @@ def build_s06_system(workdir: Path = WORKDIR) -> str:
         "Keep long-running conversations compact by persisting oversized tool output, "
         "compacting stale tool results, and summarizing history before the context window fills up."
     )
+
+
+def build_s07_system(workdir: Path = WORKDIR) -> str:
+    return (
+        f"You are a coding agent at {workdir}. "
+        "Use load_skill when a task needs specialized instructions before you act. "
+        "Keep long-running conversations compact by persisting oversized tool output, "
+        "compacting stale tool results, and summarizing history before the context window fills up. "
+        "Some tool calls require permission; if a tool is denied, adapt and continue with the allowed path."
+    )

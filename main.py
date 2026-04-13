@@ -1,7 +1,8 @@
 import os
 
 from log import append_session_log, create_session_log_file
-from s06_compact import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
+from permission import PermissionManager
+from s07_permission import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
 from terminal import print_assistant_reply, print_banner, print_status
 from utils import count_available_skills, handle_builtin_command, is_exit_command
 
@@ -11,6 +12,7 @@ PROMPT = "\033[36muser >> \033[0m"
 
 def run_cli():
     conversation = []
+    perms = PermissionManager()
     skill_count = count_available_skills(AVAILABLE_SKILLS_TEXT)
     log_path = create_session_log_file(
         model=MODEL,
@@ -59,7 +61,7 @@ def run_cli():
 
         conversation.append({"role": "user", "content": query})
         append_session_log("user_input", {"content": query}, log_path)
-        reply = agent_loop(conversation, render_final=False, log_path=log_path)
+        reply = agent_loop(conversation, render_final=False, log_path=log_path, perms=perms)
         if reply:
             print_assistant_reply(reply)
         else:
