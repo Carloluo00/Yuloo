@@ -34,6 +34,23 @@ class FakeClient:
 
 
 class SubagentLoggingTests(unittest.TestCase):
+    def test_task_subagent_reuses_parent_permission_manager(self):
+        task_block = make_block(
+            "function_call",
+            name="task",
+            arguments=json.dumps({"prompt": "inspect repo", "description": "explore files"}),
+            call_id="parent-call-0",
+        )
+        perms = object()
+
+        with patch.object(tools, "run_subagent", return_value="delegated summary") as run_subagent, patch.object(
+            tools, "print_status"
+        ):
+            output = tools.run_tool_call(task_block, None, perms=perms)
+
+        self.assertEqual(output, "delegated summary")
+        self.assertIs(run_subagent.call_args.kwargs["perms"], perms)
+
     def test_task_logs_subagent_lifecycle_and_tool_results(self):
         client = FakeClient(
             [
@@ -195,6 +212,111 @@ class SubagentLoggingTests(unittest.TestCase):
         )
         self.assertIsNot(subagent_input, parent_conversation)
         self.assertEqual(parent_conversation[-1]["output"], "[ ] #1: delegated task")
+
+    def test_subagent_checks_permissions_before_running_child_tools(self):
+        client = FakeClient(
+            [
+                make_response(
+                    [
+                        make_block(
+                            "function_call",
+                            name="bash",
+                            arguments='{"command":"echo delegated"}',
+                            call_id="sub-call-2",
+                        )
+                    ]
+                ),
+                make_response(
+                    [
+                        make_block(
+                            "message",
+                            content=[SimpleNamespace(type="output_text", text="blocked safely")],
+                        )
+                    ],
+                    output_text="blocked safely",
+                ),
+            ]
+        )
+        logged_events = []
+
+        class FakePerms:
+            def __init__(self):
+                self.ask_calls = []
+
+            def check(self, tool_name, tool_args):
+                if tool_name == "bash":
+                    return {"behavior": "ask", "reason": "needs explicit approval"}
+                return {"behavior": "allow", "reason": "safe"}
+
+            def ask_user(self, tool_name, tool_args):
+                self.ask_calls.append((tool_name, tool_args))
+                return False
+
+        perms = FakePerms()
+
+        def fake_log(event, payload, log_path):
+            logged_events.append((event, payload, log_path))
+
+        with patch.object(tools, "client", client), patch.object(
+            tools, "append_session_log", side_effect=fake_log
+        ), patch.object(tools, "print_status"), patch.dict(
+            tools.TOOL_HANDLERS,
+            {"bash": lambda command: (_ for _ in ()).throw(AssertionError("bash should not run"))},
+            clear=False,
+        ):
+            summary = tools.run_subagent(
+                "inspect safely",
+                log_path="logs/test.jsonl",
+                parent_call_id="parent-call-4",
+                description="inspect docs",
+                perms=perms,
+            )
+
+        self.assertEqual(summary, "blocked safely")
+        self.assertEqual(perms.ask_calls, [("bash", {"command": "echo delegated"})])
+        permission_payload = next(
+            payload for event, payload, _ in logged_events if event == "subagent_permission_decision"
+        )
+        self.assertEqual(permission_payload["tool"], "bash")
+        self.assertEqual(permission_payload["behavior"], "ask")
+        second_turn_input = client.responses.calls[1]["input"]
+        denied_result = next(item for item in second_turn_input if item.get("type") == "function_call_output")
+        self.assertEqual(denied_result["output"], "Permission denied by user for bash")
+
+    def test_subagent_turn_survives_invalid_tool_arguments(self):
+        client = FakeClient(
+            [
+                make_response(
+                    [
+                        make_block(
+                            "function_call",
+                            name="read_file",
+                            arguments='{"path":',
+                            call_id="sub-call-bad-json",
+                        )
+                    ]
+                ),
+                make_response(
+                    [
+                        make_block(
+                            "message",
+                            content=[SimpleNamespace(type="output_text", text="recovered")],
+                        )
+                    ],
+                    output_text="recovered",
+                ),
+            ]
+        )
+
+        with patch.object(tools, "client", client), patch.object(tools, "append_session_log"), patch.object(
+            tools, "print_status"
+        ):
+            summary = tools.run_subagent("inspect safely", log_path="logs/test.jsonl")
+
+        self.assertEqual(summary, "recovered")
+        second_turn_input = client.responses.calls[1]["input"]
+        error_result = next(item for item in second_turn_input if item.get("type") == "function_call_output")
+        self.assertIn("Invalid tool arguments JSON", error_result["output"])
 
 
 if __name__ == "__main__":

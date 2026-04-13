@@ -190,7 +190,7 @@ def run_write(path: str, content: str) -> str:
     try:
         fp = safe_path(path)
         fp.parent.mkdir(parents=True, exist_ok=True)
-        fp.write_text(content)
+        fp.write_text(content, encoding="utf-8")
         return f"Wrote {len(content)} bytes to {path}"
     except Exception as exc:
         return f"Error: {exc}"
@@ -198,10 +198,10 @@ def run_write(path: str, content: str) -> str:
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
         fp = safe_path(path)
-        content = fp.read_text()
+        content, encoding = _read_text_with_fallback(fp, return_encoding=True)
         if old_text not in content:
             return f"Error: Text not found in {path}"
-        fp.write_text(content.replace(old_text, new_text, 1))
+        fp.write_text(content.replace(old_text, new_text, 1), encoding=encoding)
         return f"Edited {path}"
     except Exception as exc:
         return f"Error: {exc}"
@@ -293,6 +293,66 @@ def maybe_add_todo_reminder(
     return 0
 
 
+def maybe_authorize_subagent_tool_call(
+    tool_name: str,
+    tool_args: dict,
+    perms,
+    *,
+    log_path: str | None = None,
+    subagent_id: str | None = None,
+    parent_call_id: str | None = None,
+    turn: int | None = None,
+) -> str | None:
+    if perms is None:
+        return None
+
+    decision = perms.check(tool_name, tool_args)
+    if log_path:
+        append_session_log(
+            "subagent_permission_decision",
+            {
+                "subagent_id": subagent_id,
+                "parent_call_id": parent_call_id,
+                "turn": turn,
+                "tool": tool_name,
+                "args": tool_args,
+                "behavior": decision["behavior"],
+                "reason": decision["reason"],
+            },
+            log_path,
+        )
+
+    if decision["behavior"] == "deny":
+        print_status(f"Denied {tool_name}: {decision['reason']}", "33")
+        return f"Permission denied: {decision['reason']}"
+
+    if decision["behavior"] == "ask":
+        if perms.ask_user(tool_name, tool_args):
+            return None
+        print_status(f"User denied {tool_name}", "33")
+        return f"Permission denied by user for {tool_name}"
+
+    return None
+
+
+def decode_tool_arguments(raw_arguments) -> tuple[dict, str | None]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments, None
+
+    if not isinstance(raw_arguments, str):
+        return {}, f"Tool arguments must be a JSON object string, got {type(raw_arguments).__name__}"
+
+    try:
+        args = json.loads(raw_arguments)
+    except JSONDecodeError as exc:
+        return {}, f"Invalid tool arguments JSON: {exc}"
+
+    if not isinstance(args, dict):
+        return {}, f"Tool arguments must decode to an object, got {type(args).__name__}"
+
+    return args, None
+
+
 
 
 
@@ -302,6 +362,7 @@ def run_subagent(
     parent_call_id: str | None = None,
     description: str | None = None,
     parent_conversation: list | None = None,
+    perms=None,
 ) -> str:
     # Work on a snapshot so subagent turns cannot mutate the parent transcript in place.
     sub_conversation = deepcopy(parent_conversation) if parent_conversation else []
@@ -351,9 +412,24 @@ def run_subagent(
             if block.type != "function_call":
                 continue
             handler = TOOL_HANDLERS.get(block.name)
-            args = json.loads(block.arguments)
+            args, args_error = decode_tool_arguments(block.arguments)
             try:
-                output = handler(**args) if handler else f"Error: Unknown tool '{block.name}'"
+                if args_error is not None:
+                    output = f"Error: {args_error}"
+                else:
+                    permission_output = maybe_authorize_subagent_tool_call(
+                        block.name,
+                        args,
+                        perms,
+                        log_path=log_path,
+                        subagent_id=subagent_id,
+                        parent_call_id=parent_call_id,
+                        turn=turn,
+                    )
+                    if permission_output is not None:
+                        output = permission_output
+                    else:
+                        output = handler(**args) if handler else f"Error: Unknown tool '{block.name}'"
             except Exception as exc:
                 output = f"Error: {exc}"
             results.append({"type": "function_call_output", "call_id": block.call_id, "output": output})
@@ -395,8 +471,18 @@ def run_subagent(
 
 
 
-def run_tool_call(block, log_path: str | None, parent_conversation: list | None = None):
-    args = json.loads(block.arguments)
+def run_tool_call(block, log_path: str | None, parent_conversation: list | None = None, perms=None):
+    args, args_error = decode_tool_arguments(block.arguments)
+    if args_error is not None:
+        output = f"Error: {args_error}"
+        print_status(f"{block.name} failed: {args_error}", "31")
+        if log_path:
+            append_session_log(
+                "tool_error",
+                {"name": block.name, "raw_arguments": getattr(block, "arguments", None), "error": args_error},
+                log_path,
+            )
+        return output
     print_status(f"Running {block.name}: {args}", "90")
 
     # task is the only tool that delegates to another model loop instead of a local handler.
@@ -410,6 +496,7 @@ def run_tool_call(block, log_path: str | None, parent_conversation: list | None 
             parent_call_id=block.call_id,
             description=desc,
             parent_conversation=parent_conversation,
+            perms=perms,
         )
     else:
         handler = TOOL_HANDLERS.get(block.name)
@@ -494,7 +581,7 @@ class SkillRegistry:
 
     def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
         # SKILL.md metadata is intentionally tiny, so a permissive regex parser is enough here.
-        match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
+        match = re.match(r"^---\r?\n(.*?)\r?\n---\r?\n(.*)", text, re.DOTALL)
         if not match:
             return {}, text
 

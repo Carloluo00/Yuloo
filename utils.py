@@ -84,9 +84,15 @@ def extract_response_text(response) -> str:
                 parts.append(text)
     return "".join(parts)
 
-def _read_text_with_fallback(path) -> str:
+def _read_text_with_fallback(path, *, return_encoding: bool = False):
     try:
-        return path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
+        encoding = "utf-8"
     except UnicodeDecodeError:
         # The tutorial targets Windows too, so tolerate legacy local encodings when reading skills/files.
-        return path.read_text(encoding="gbk", errors="replace")
+        text = path.read_text(encoding="gbk", errors="replace")
+        encoding = "gbk"
+
+    if return_encoding:
+        return text, encoding
+    return text

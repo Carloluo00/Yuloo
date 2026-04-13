@@ -111,12 +111,22 @@ def agent_loop(
                 print_status(f"Denied {block.name}: {decision['reason']}", "33")
             elif decision["behavior"] == "ask":
                 if perms.ask_user(block.name, tool_args):
-                    output = run_tool_call(block, log_path, parent_conversation=conversation)
+                    output = run_tool_call(
+                        block,
+                        log_path,
+                        parent_conversation=conversation,
+                        perms=perms,
+                    )
                 else:
                     output = f"Permission denied by user for {block.name}"
                     print_status(f"User denied {block.name}", "33")
             else:
-                output = run_tool_call(block, log_path, parent_conversation=conversation)
+                output = run_tool_call(
+                    block,
+                    log_path,
+                    parent_conversation=conversation,
+                    perms=perms,
+                )
 
             tool_result = {
                 "type": "function_call_output",

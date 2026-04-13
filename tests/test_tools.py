@@ -186,6 +186,112 @@ class TodoToolTests(unittest.TestCase):
         show_status.assert_not_called()
         log_event.assert_not_called()
 
+    def test_run_write_uses_utf8_encoding(self):
+        target = self.tmp_root / "write-target.txt"
+
+        with patch.object(tools, "safe_path", return_value=target), patch(
+            "pathlib.Path.write_text",
+            autospec=True,
+            return_value=len("你好"),
+        ) as write_text:
+            result = tools.run_write("write-target.txt", "你好")
+
+        self.assertEqual(result, "Wrote 2 bytes to write-target.txt")
+        self.assertEqual(write_text.call_args.kwargs["encoding"], "utf-8")
+
+    def test_run_edit_uses_explicit_utf8_for_utf8_files(self):
+        target = self.tmp_root / "README.zh-CN.md"
+        written = {}
+
+        def fake_read_text(path_obj, *args, **kwargs):
+            self.assertEqual(path_obj, target)
+            self.assertEqual(kwargs.get("encoding"), "utf-8")
+            return "prefix old suffix"
+
+        def fake_write_text(path_obj, content, *args, **kwargs):
+            written["path"] = path_obj
+            written["content"] = content
+            written["encoding"] = kwargs.get("encoding")
+            return len(content)
+
+        with patch.object(tools, "safe_path", return_value=target), patch(
+            "pathlib.Path.read_text",
+            autospec=True,
+            side_effect=fake_read_text,
+        ), patch(
+            "pathlib.Path.write_text",
+            autospec=True,
+            side_effect=fake_write_text,
+        ):
+            result = tools.run_edit("README.zh-CN.md", "old", "new")
+
+        self.assertEqual(result, "Edited README.zh-CN.md")
+        self.assertEqual(written["path"], target)
+        self.assertEqual(written["content"], "prefix new suffix")
+        self.assertEqual(written["encoding"], "utf-8")
+
+    def test_run_edit_preserves_fallback_encoding_for_legacy_files(self):
+        target = self.tmp_root / "legacy.txt"
+        written = {}
+
+        def fake_read_text(path_obj, *args, **kwargs):
+            self.assertEqual(path_obj, target)
+            if kwargs.get("encoding") == "utf-8":
+                raise UnicodeDecodeError("utf-8", b"\x80", 0, 1, "bad start byte")
+            self.assertEqual(kwargs.get("encoding"), "gbk")
+            return "legacy old text"
+
+        def fake_write_text(path_obj, content, *args, **kwargs):
+            written["path"] = path_obj
+            written["content"] = content
+            written["encoding"] = kwargs.get("encoding")
+            return len(content)
+
+        with patch.object(tools, "safe_path", return_value=target), patch(
+            "pathlib.Path.read_text",
+            autospec=True,
+            side_effect=fake_read_text,
+        ), patch(
+            "pathlib.Path.write_text",
+            autospec=True,
+            side_effect=fake_write_text,
+        ):
+            result = tools.run_edit("legacy.txt", "old", "new")
+
+        self.assertEqual(result, "Edited legacy.txt")
+        self.assertEqual(written["path"], target)
+        self.assertEqual(written["content"], "legacy new text")
+        self.assertEqual(written["encoding"], "gbk")
+
+    def test_run_tool_call_returns_error_for_invalid_json_arguments(self):
+        block = SimpleNamespace(
+            type="function_call",
+            name="read_file",
+            arguments='{"path":',
+            call_id="bad-json-call",
+        )
+
+        with patch.object(tools, "append_session_log") as log_event, patch.object(
+            tools, "print_status"
+        ) as show_status:
+            output = tools.run_tool_call(block, "logs/test.jsonl")
+
+        self.assertIn("Invalid tool arguments JSON", output)
+        show_status.assert_called_once()
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.args[0], "tool_error")
+
+    def test_skill_parser_accepts_crlf_frontmatter(self):
+        registry = tools.SkillRegistry(self.tmp_root / "skills")
+
+        meta, body = registry._parse_frontmatter(
+            "---\r\nname: planner\r\ndescription: CRLF skill\r\n---\r\nbody line\r\n"
+        )
+
+        self.assertEqual(meta["name"], "planner")
+        self.assertEqual(meta["description"], "CRLF skill")
+        self.assertEqual(body, "body line\r\n")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,6 +73,33 @@ class PermissionManagerTests(unittest.TestCase):
             "allow",
         )
 
+    def test_always_for_flagged_bash_command_skips_repeat_prompt(self):
+        manager = permission.PermissionManager()
+
+        with patch("builtins.input", return_value="always"):
+            approved = manager.ask_user("bash", {"command": "dir | findstr py"})
+
+        self.assertTrue(approved)
+        self.assertEqual(
+            manager.check("bash", {"command": "dir | findstr py"})["behavior"],
+            "allow",
+        )
+        self.assertEqual(
+            manager.check("bash", {"command": "dir | findstr md"})["behavior"],
+            "ask",
+        )
+
+    def test_severe_bash_validator_still_denies_even_with_allow_rule(self):
+        manager = permission.PermissionManager(
+            rules=list(permission.DEFAULT_RULES)
+            + [{"tool": "bash", "content": "sudo dir", "behavior": "allow"}]
+        )
+
+        decision = manager.check("bash", {"command": "sudo dir"})
+
+        self.assertEqual(decision["behavior"], "deny")
+        self.assertIn("Bash validator", decision["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,22 +89,18 @@ class PermissionManager:
         """
         Returns: {"behavior": "allow"|"deny"|"ask", "reason": str}
         """
-        # Step 0: Bash security validation (before deny rules)
+        bash_failures = []
+        # Step 0: Bash security validation for bypass-immune severe patterns.
         if tool_name == "bash":
             command = tool_args.get("command", "")
-            failures = bash_validator.validate(command)
-            if failures:
-                # Severe patterns (sudo, rm_rf) get immediate deny
+            bash_failures = bash_validator.validate(command)
+            if bash_failures:
                 severe = {"sudo", "rm_rf"}
-                severe_hits = [f for f in failures if f[0] in severe]
+                severe_hits = [f for f in bash_failures if f[0] in severe]
                 if severe_hits:
                     desc = bash_validator.describe_failures(command)
                     return {"behavior": "deny",
                             "reason": f"Bash validator: {desc}"}
-                # Other patterns escalate to ask (user can still approve)
-                desc = bash_validator.describe_failures(command)
-                return {"behavior": "ask",
-                        "reason": f"Bash validator flagged: {desc}"}
 
         # Step 1: Deny rules (bypass-immune, checked first always)
         for rule in self.rules:
@@ -138,6 +134,11 @@ class PermissionManager:
                 self.consecutive_denials = 0
                 return {"behavior": "allow",
                         "reason": f"Matched allow rule: {rule}"}
+
+        if bash_failures:
+            desc = bash_validator.describe_failures(tool_args.get("command", ""))
+            return {"behavior": "ask",
+                    "reason": f"Bash validator flagged: {desc}"}
 
         # Step 4: Ask user (default behavior for unmatched tools)
         return {"behavior": "ask",
