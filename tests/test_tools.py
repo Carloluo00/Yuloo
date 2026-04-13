@@ -1,4 +1,6 @@
+import shutil
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,6 +15,12 @@ def get_tool(name: str):
 class TodoToolTests(unittest.TestCase):
     def setUp(self):
         self.manager = tools.TodoManager()
+        self.tmp_root = Path("tests") / "_tmp_tool_persist"
+        shutil.rmtree(self.tmp_root, ignore_errors=True)
+        self.tmp_root.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_root, ignore_errors=True)
 
     def test_todo_tool_schema_warns_against_stringifying_items(self):
         todo_tool = get_tool("todo")
@@ -58,6 +66,54 @@ class TodoToolTests(unittest.TestCase):
                 for event, payload, _ in logged_events
             )
         )
+
+    def test_run_tool_call_persists_large_output(self):
+        block = SimpleNamespace(
+            type="function_call",
+            name="bash",
+            arguments='{"command":"dir"}',
+            call_id="persist-call-1",
+        )
+        outputs_dir = self.tmp_root / ".task_outputs" / "tool-results"
+
+        with patch.object(tools, "WORKDIR", self.tmp_root), patch.object(
+            tools, "TOOL_RESULTS_DIR", outputs_dir
+        ), patch.object(tools, "PERSIST_THRESHOLD", 10), patch.object(
+            tools, "PREVIEW_CHARS", 5
+        ), patch.object(tools, "print_status"), patch.dict(
+            tools.TOOL_HANDLERS, {"bash": lambda command: "A" * 50}, clear=False
+        ):
+            output = tools.run_tool_call(block, None)
+
+        stored_path = outputs_dir / "persist-call-1.txt"
+        self.assertTrue(stored_path.exists())
+        self.assertEqual(stored_path.read_text(encoding="utf-8"), "A" * 50)
+        self.assertIn("<persisted-output>", output)
+        self.assertIn("AAAAA", output)
+
+    def test_run_tool_call_does_not_repersist_reads_from_tool_results_dir(self):
+        block = SimpleNamespace(
+            type="function_call",
+            name="read_file",
+            arguments='{"path":".task_outputs/tool-results/saved.txt"}',
+            call_id="persist-call-2",
+        )
+        outputs_dir = self.tmp_root / ".task_outputs" / "tool-results"
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = outputs_dir / "saved.txt"
+        saved_path.write_text("B" * 50, encoding="utf-8")
+
+        with patch.object(tools, "WORKDIR", self.tmp_root), patch.object(
+            tools, "TOOL_RESULTS_DIR", outputs_dir
+        ), patch.object(tools, "PERSIST_THRESHOLD", 10), patch.object(
+            tools, "print_status"
+        ), patch.dict(
+            tools.TOOL_HANDLERS, {"read_file": lambda path, limit=None: "B" * 50}, clear=False
+        ):
+            output = tools.run_tool_call(block, None)
+
+        self.assertEqual(output, "B" * 50)
+        self.assertFalse((outputs_dir / "persist-call-2.txt").exists())
 
     def test_update_accepts_json_encoded_array_string(self):
         output = self.manager.update(

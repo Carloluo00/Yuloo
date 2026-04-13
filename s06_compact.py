@@ -93,12 +93,10 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
                 track_recent_file(compact_state, file_path.strip())
 
             output = run_tool_call(block, log_path, parent_conversation=conversation)
-            # Large tool output is still preserved on disk; only a preview stays in context.
-            persisted_output = persist_large_output(block.call_id, output)
             tool_result = {
                 "type": "function_call_output",
                 "call_id": block.call_id,
-                "output": persisted_output,
+                "output": output,
             }
             if block.name == "todo":
                 used_todo = True
@@ -120,5 +118,3 @@ def agent_loop(conversation: list, render_final: bool = True, log_path: str | No
             TODO_REMINDER_INTERVAL,
             TODO_REMINDER_MESSAGE,
         )
-
-

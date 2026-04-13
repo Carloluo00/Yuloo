@@ -461,7 +461,7 @@ def run_tool_call(block, log_path: str | None, parent_conversation: list | None 
                     log_path,
                 )
 
-    return output
+    return maybe_persist_tool_output(block.name, args, block.call_id, output)
 
 
 @dataclass
@@ -541,6 +541,7 @@ CONTEXT_CHAR_THRESHOLD = 80_000
 EARLIER_TOOL_RESULT_PLACEHOLDER = (
     "[Earlier tool result compacted. Re-run the tool if you need full detail.]"
 )
+PERSIST_ELIGIBLE_TOOLS = {"bash", "read_file"}
 
 
 @dataclass
@@ -558,6 +559,32 @@ def track_recent_file(state: CompactState, path: str) -> None:
     state.recent_files.append(path)
     if len(state.recent_files) > 5:
         state.recent_files[:] = state.recent_files[-5:]
+
+def _resolve_tool_path(path: str) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = WORKDIR / candidate
+    return candidate.resolve()
+
+def is_persisted_tool_result_read(tool_name: str, tool_args: dict) -> bool:
+    if tool_name != "read_file":
+        return False
+
+    path = tool_args.get("path")
+    if not isinstance(path, str) or not path.strip():
+        return False
+
+    try:
+        return _resolve_tool_path(path).is_relative_to(TOOL_RESULTS_DIR.resolve())
+    except (OSError, ValueError):
+        return False
+
+def maybe_persist_tool_output(tool_name: str, tool_args: dict, tool_use_id: str, output: str) -> str:
+    if tool_name not in PERSIST_ELIGIBLE_TOOLS:
+        return output
+    if is_persisted_tool_result_read(tool_name, tool_args):
+        return output
+    return persist_large_output(tool_use_id, output)
 
 def persist_large_output(tool_use_id: str, output: str) -> str:
     if not isinstance(output, str) or len(output) <= PERSIST_THRESHOLD:

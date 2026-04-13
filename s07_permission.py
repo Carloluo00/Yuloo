@@ -16,7 +16,6 @@ from tools import (
     maybe_add_todo_reminder,
     maybe_compact_history,
     micro_compact,
-    persist_large_output,
     run_tool_call,
     track_recent_file,
 )
@@ -119,12 +118,10 @@ def agent_loop(
             else:
                 output = run_tool_call(block, log_path, parent_conversation=conversation)
 
-            # Large tool output is still preserved on disk; only a preview stays in context.
-            persisted_output = persist_large_output(block.call_id, output)
             tool_result = {
                 "type": "function_call_output",
                 "call_id": block.call_id,
-                "output": persisted_output,
+                "output": output,
             }
             
             if block.name == "todo":
@@ -147,5 +144,4 @@ def agent_loop(
             TODO_REMINDER_INTERVAL,
             TODO_REMINDER_MESSAGE,
         )
-
 
