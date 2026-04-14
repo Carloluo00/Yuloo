@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 import json
 from fnmatch import fnmatch
-from config import WORKDIR
+from config import TRUST_MARKER, WORKDIR
 
 
 MODES = ("default", "plan", "auto")
@@ -62,8 +62,9 @@ def is_workspace_trusted(workspace: Path = None) -> bool:
     Check if a workspace has been explicitly marked as trusted.
     """
     ws = workspace or WORKDIR
-    trust_marker = ws / ".claude" / ".claude_trusted"
-    return trust_marker.exists()
+    if ws == WORKDIR:
+        return TRUST_MARKER.exists()
+    return (ws / TRUST_MARKER.relative_to(WORKDIR)).exists()
 
 
 bash_validator = BashSecurityValidator()

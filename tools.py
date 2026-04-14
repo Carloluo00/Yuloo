@@ -23,6 +23,7 @@ from config import (
     build_client,
     build_subagent_system,
 )
+from hook import default_hook_result, merge_permission_override
 from utils import safe_path, extract_response_text, _read_text_with_fallback
 from log import append_session_log, event_to_dict
 from terminal import print_skill_state, print_status, print_todo_state
@@ -198,10 +199,10 @@ def run_write(path: str, content: str) -> str:
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
         fp = safe_path(path)
-        content, encoding = _read_text_with_fallback(fp, return_encoding=True)
+        content = _read_text_with_fallback(fp)
         if old_text not in content:
             return f"Error: Text not found in {path}"
-        fp.write_text(content.replace(old_text, new_text, 1), encoding=encoding)
+        fp.write_text(content.replace(old_text, new_text, 1), encoding="utf-8")
         return f"Edited {path}"
     except Exception as exc:
         return f"Error: {exc}"
@@ -268,6 +269,19 @@ class TodoManager:
         lines.append(f"\n({done}/{len(self.items)} completed)")
         return "\n".join(lines)
 
+def _todo_render(self) -> str:
+    if not self.items:
+        return "No todos."
+    lines = []
+    for item in self.items:
+        marker = {"pending": "[ ]", "in_progress": "[>]", "completed": "[✓]"}[item["status"]]
+        lines.append(f"{marker} #{item['id']}: {item['text']}")
+    done = sum(1 for t in self.items if t["status"] == "completed")
+    lines.append(f"\n({done}/{len(self.items)} completed)")
+    return "\n".join(lines)
+
+
+TodoManager.render = _todo_render
 TODO = TodoManager()
 
 def maybe_add_todo_reminder(
@@ -293,46 +307,142 @@ def maybe_add_todo_reminder(
     return 0
 
 
-def maybe_authorize_subagent_tool_call(
-    tool_name: str,
-    tool_args: dict,
-    perms,
+def merge_permission_decision(base: dict | None, override: dict | None) -> dict:
+    merged = merge_permission_override(base, override)
+    if merged is None:
+        return {"behavior": "allow", "reason": "No permission gate applied"}
+    return merged
+
+
+def inject_hook_messages(
+    conversation: list,
+    messages: list[str],
     *,
     log_path: str | None = None,
-    subagent_id: str | None = None,
-    parent_call_id: str | None = None,
-    turn: int | None = None,
-) -> str | None:
-    if perms is None:
-        return None
+    source: str,
+    tool_name: str | None = None,
+    call_id: str | None = None,
+):
+    for message in messages:
+        content = f"Hook note ({source}): {message}"
+        conversation.append({"role": "user", "content": content})
+        if log_path:
+            append_session_log(
+                "hook_message_injected",
+                {
+                    "source": source,
+                    "tool_name": tool_name,
+                    "call_id": call_id,
+                    "message": message,
+                },
+                log_path,
+            )
 
-    decision = perms.check(tool_name, tool_args)
+
+def execute_tool_call_with_policy(
+    block,
+    *,
+    log_path: str | None,
+    parent_conversation: list | None = None,
+    perms=None,
+    hooks=None,
+    permission_log_event: str = "permission_decision",
+    permission_log_payload: dict | None = None,
+):
+    args, args_error = decode_tool_arguments(block.arguments)
+    if args_error is not None:
+        output = f"Error: {args_error}"
+        print_status(f"{block.name} failed: {args_error}", "31")
+        if log_path:
+            append_session_log(
+                "tool_error",
+                {"name": block.name, "raw_arguments": getattr(block, "arguments", None), "error": args_error},
+                log_path,
+            )
+        return {
+            "output": output,
+            "tool_args": args,
+            "hook_messages": [],
+            "permission_decision": None,
+        }
+
+    pre_hook = default_hook_result()
+    if hooks is not None:
+        pre_hook = hooks.run_hooks(
+            "PreToolUse",
+            {"tool_name": block.name, "tool_args": args},
+        )
+        if pre_hook["updated_tool_args"] is not None:
+            args = pre_hook["updated_tool_args"]
+
+    if pre_hook["blocked"]:
+        output = f"Blocked by hook: {pre_hook['block_reason']}"
+        print_status(f"Blocked {block.name}: {pre_hook['block_reason']}", "33")
+        return {
+            "output": output,
+            "tool_args": args,
+            "hook_messages": list(pre_hook["messages"]),
+            "permission_decision": None,
+        }
+
+    base_decision = (
+        perms.check(block.name, args)
+        if perms is not None
+        else {"behavior": "allow", "reason": "No permission manager configured"}
+    )
+    decision = merge_permission_decision(base_decision, pre_hook["permission_override"])
     if log_path:
-        append_session_log(
-            "subagent_permission_decision",
-            {
-                "subagent_id": subagent_id,
-                "parent_call_id": parent_call_id,
-                "turn": turn,
-                "tool": tool_name,
-                "args": tool_args,
-                "behavior": decision["behavior"],
-                "reason": decision["reason"],
-            },
+        payload = {
+            "tool": block.name,
+            "args": args,
+            "behavior": decision["behavior"],
+            "reason": decision["reason"],
+        }
+        if permission_log_payload:
+            payload = {**permission_log_payload, **payload}
+        append_session_log(permission_log_event, payload, log_path)
+
+    executed = False
+    if decision["behavior"] == "deny":
+        output = f"Permission denied: {decision['reason']}"
+        print_status(f"Denied {block.name}: {decision['reason']}", "33")
+    elif decision["behavior"] == "ask":
+        if perms is not None and perms.ask_user(block.name, args):
+            executed = True
+            output = run_tool_call(
+                block,
+                log_path,
+                parent_conversation=parent_conversation,
+                perms=perms,
+                resolved_args=args,
+                hooks=hooks,
+            )
+        else:
+            output = f"Permission denied by user for {block.name}"
+            print_status(f"User denied {block.name}", "33")
+    else:
+        executed = True
+        output = run_tool_call(
+            block,
             log_path,
+            parent_conversation=parent_conversation,
+            perms=perms,
+            resolved_args=args,
+            hooks=hooks,
         )
 
-    if decision["behavior"] == "deny":
-        print_status(f"Denied {tool_name}: {decision['reason']}", "33")
-        return f"Permission denied: {decision['reason']}"
-
-    if decision["behavior"] == "ask":
-        if perms.ask_user(tool_name, tool_args):
-            return None
-        print_status(f"User denied {tool_name}", "33")
-        return f"Permission denied by user for {tool_name}"
-
-    return None
+    post_hook = default_hook_result()
+    if hooks is not None and executed:
+        post_hook = hooks.run_hooks(
+            "PostToolUse",
+            {"tool_name": block.name, "tool_args": args, "tool_output": output},
+        )
+    return {
+        "output": output,
+        "tool_args": args,
+        "hook_messages": list(pre_hook["messages"]) + list(post_hook["messages"]),
+        "permission_decision": decision,
+    }
 
 
 def decode_tool_arguments(raw_arguments) -> tuple[dict, str | None]:
@@ -363,6 +473,7 @@ def run_subagent(
     description: str | None = None,
     parent_conversation: list | None = None,
     perms=None,
+    hooks=None,
 ) -> str:
     # Work on a snapshot so subagent turns cannot mutate the parent transcript in place.
     sub_conversation = deepcopy(parent_conversation) if parent_conversation else []
@@ -408,30 +519,25 @@ def run_subagent(
             )
 
         results = []
+        pending_hook_messages = []
         for block in response.output:
             if block.type != "function_call":
                 continue
-            handler = TOOL_HANDLERS.get(block.name)
-            args, args_error = decode_tool_arguments(block.arguments)
-            try:
-                if args_error is not None:
-                    output = f"Error: {args_error}"
-                else:
-                    permission_output = maybe_authorize_subagent_tool_call(
-                        block.name,
-                        args,
-                        perms,
-                        log_path=log_path,
-                        subagent_id=subagent_id,
-                        parent_call_id=parent_call_id,
-                        turn=turn,
-                    )
-                    if permission_output is not None:
-                        output = permission_output
-                    else:
-                        output = handler(**args) if handler else f"Error: Unknown tool '{block.name}'"
-            except Exception as exc:
-                output = f"Error: {exc}"
+            execution = execute_tool_call_with_policy(
+                block,
+                log_path=log_path,
+                parent_conversation=sub_conversation,
+                perms=perms,
+                hooks=hooks,
+                permission_log_event="subagent_permission_decision",
+                permission_log_payload={
+                    "subagent_id": subagent_id,
+                    "parent_call_id": parent_call_id,
+                    "turn": turn,
+                },
+            )
+            output = execution["output"]
+            args = execution["tool_args"]
             results.append({"type": "function_call_output", "call_id": block.call_id, "output": output})
 
             if log_path:
@@ -449,10 +555,20 @@ def run_subagent(
                     },
                     log_path,
                 )
+            pending_hook_messages.append((block.name, block.call_id, execution["hook_messages"]))
         
         if not results:
             break
         sub_conversation += results
+        for tool_name, call_id, messages in pending_hook_messages:
+            inject_hook_messages(
+                sub_conversation,
+                messages,
+                log_path=log_path,
+                source="post_tool",
+                tool_name=tool_name,
+                call_id=call_id,
+            )
 
     if log_path:
         append_session_log(
@@ -471,8 +587,18 @@ def run_subagent(
 
 
 
-def run_tool_call(block, log_path: str | None, parent_conversation: list | None = None, perms=None):
-    args, args_error = decode_tool_arguments(block.arguments)
+def run_tool_call(
+    block,
+    log_path: str | None,
+    parent_conversation: list | None = None,
+    perms=None,
+    resolved_args: dict | None = None,
+    hooks=None,
+):
+    args = deepcopy(resolved_args) if resolved_args is not None else None
+    args_error = None
+    if args is None:
+        args, args_error = decode_tool_arguments(block.arguments)
     if args_error is not None:
         output = f"Error: {args_error}"
         print_status(f"{block.name} failed: {args_error}", "31")
@@ -497,6 +623,7 @@ def run_tool_call(block, log_path: str | None, parent_conversation: list | None 
             description=desc,
             parent_conversation=parent_conversation,
             perms=perms,
+            hooks=hooks,
         )
     else:
         handler = TOOL_HANDLERS.get(block.name)

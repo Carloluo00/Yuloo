@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "log_message": "Loaded default YULOO hooks",
+        "additional_context": "Prefer structured tools over bash when possible. Use todo for multi-step work, keep one item in_progress, and keep edits tightly scoped."
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "permission_decision": {
+          "behavior": "ask",
+          "reason": "Shell commands have broader blast radius than structured file tools in YULOO"
+        }
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "read_file",
+        "additional_context": "Use concrete file evidence from what you just read before deciding to edit, delegate, or answer."
+      },
+      {
+        "matcher": "task",
+        "additional_context": "Integrate the delegated result into the parent plan or answer on the next turn; do not leave subagent output hanging."
+      },
+      {
+        "matcher": "todo",
+        "additional_context": "Keep the todo list synchronized with actual progress and maintain at most one in_progress item."
+      },
+      {
+        "matcher": "load_skill",
+        "additional_context": "Apply the loaded skill immediately and do not carry it forward implicitly after the current task unless it is re-invoked."
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import s04_subagents
 import s05_skill_loading
 import s06_compact
 import s07_permission
+import s08_hook
 import tools
 
 
@@ -13,11 +14,16 @@ class ConfigTests(unittest.TestCase):
     def test_shared_config_is_exposed_through_runtime_modules(self):
         import config
 
+        self.assertEqual(config.WORKDIR.name, "YULOO_WORKSPACE")
+        self.assertTrue(config.WORKDIR.is_absolute())
+        self.assertEqual(config.SKILLS_DIR, config.PROJECT_ROOT / "skills")
+        self.assertEqual(config.LOG_DIR, config.PROJECT_ROOT / "logs")
         self.assertEqual(s03_todo_write.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s04_subagents.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s05_skill_loading.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s06_compact.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s07_permission.MODEL, config.DEFAULT_MODEL)
+        self.assertEqual(s08_hook.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(tools.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(main.MODEL, config.DEFAULT_MODEL)
         self.assertEqual(s03_todo_write.TODO_REMINDER_INTERVAL, config.TODO_REMINDER_INTERVAL)
@@ -52,6 +58,10 @@ class ConfigTests(unittest.TestCase):
         self.assertIn(
             "Some tool calls require permission",
             config.build_s07_system(workdir),
+        )
+        self.assertIn(
+            "Some tool calls require permission",
+            s08_hook.SYSTEM,
         )
 
 

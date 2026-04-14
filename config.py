@@ -4,14 +4,18 @@ from pathlib import Path
 from openai import OpenAI
 
 
-WORKDIR = Path.cwd()
-SKILLS_DIR = WORKDIR / "skills"
-LOG_DIR = WORKDIR / "logs"
+PROJECT_ROOT = Path(__file__).resolve().parent
+WORKSPACE_DIRNAME = "YULOO_WORKSPACE"
+WORKDIR = PROJECT_ROOT / WORKSPACE_DIRNAME
+WORKDIR.mkdir(parents=True, exist_ok=True)
+TRUST_MARKER = WORKDIR / ".YULOO" / ".YULOO_trusted"
+SKILLS_DIR = PROJECT_ROOT / "skills"
+LOG_DIR = PROJECT_ROOT / "logs"
 
 API_KEY_ENV = "DASHSCOPE_API_KEY"
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-DEFAULT_MODEL = "qwen3.5-plus"
+DEFAULT_MODEL = "qwen3.5-flash"
 
 TODO_REMINDER_INTERVAL = 3
 TODO_REMINDER_MESSAGE = "Reminder: update your todo list if task status changed."
@@ -87,4 +91,11 @@ def build_s07_system(workdir: Path = WORKDIR) -> str:
         "Keep long-running conversations compact by persisting oversized tool output, "
         "compacting stale tool results, and summarizing history before the context window fills up. "
         "Some tool calls require permission; if a tool is denied, adapt and continue with the allowed path."
+    )
+
+
+def build_s08_system(workdir: Path = WORKDIR) -> str:
+    return (
+        f"{build_s07_system(workdir)} "
+        "Declarative hooks may observe, block, or add context around tool calls."
     )

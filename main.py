@@ -1,8 +1,10 @@
 import os
 
+from config import WORKDIR
+from hook import HookManager
 from log import append_session_log, create_session_log_file
 from permission import PermissionManager
-from s07_permission import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
+from s08_hook import AVAILABLE_SKILLS_TEXT, MODEL, RUNTIME_NAME, SESSION_LABEL, agent_loop
 from terminal import print_assistant_reply, print_banner, print_status
 from utils import count_available_skills, handle_builtin_command, is_exit_command
 
@@ -11,18 +13,20 @@ PROMPT = "\033[36muser >> \033[0m"
 
 
 def run_cli():
+    os.chdir(WORKDIR)
     conversation = []
     perms = PermissionManager()
+    hooks = HookManager()
     skill_count = count_available_skills(AVAILABLE_SKILLS_TEXT)
     log_path = create_session_log_file(
         model=MODEL,
-        cwd=os.getcwd(),
+        cwd=str(WORKDIR),
         session_label=SESSION_LABEL,
         metadata={"runtime": RUNTIME_NAME, "skills_available": skill_count},
     )
     print_banner(
         MODEL,
-        os.getcwd(),
+        str(WORKDIR),
         log_path,
         runtime_name=RUNTIME_NAME,
         skills_available=skill_count,
@@ -54,14 +58,14 @@ def run_cli():
             model=MODEL,
             runtime_name=RUNTIME_NAME,
             available_skills_text=AVAILABLE_SKILLS_TEXT,
-            cwd=os.getcwd(),
+            cwd=str(WORKDIR),
         ):
             # Built-ins are handled locally and should not consume a model turn.
             continue
 
         conversation.append({"role": "user", "content": query})
         append_session_log("user_input", {"content": query}, log_path)
-        reply = agent_loop(conversation, render_final=False, log_path=log_path, perms=perms)
+        reply = agent_loop(conversation, render_final=False, log_path=log_path, perms=perms, hooks=hooks)
         if reply:
             print_assistant_reply(reply)
         else:

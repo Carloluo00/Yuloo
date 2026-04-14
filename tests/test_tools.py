@@ -54,9 +54,17 @@ class TodoToolTests(unittest.TestCase):
         def fake_log(event, payload, log_path):
             logged_events.append((event, payload, log_path))
 
-        with patch.object(tools.SKILL_REGISTRY, "load_full_text", return_value="<skill name=\"planner\">\nbody\n</skill>"), patch.object(
+        with patch.object(
+            tools.SKILL_REGISTRY,
+            "load_full_text",
+            return_value="<skill name=\"planner\">\nbody\n</skill>",
+        ), patch.object(
             tools, "append_session_log", side_effect=fake_log
-        ), patch.object(tools, "print_status"), patch.object(tools, "print_skill_state"):
+        ), patch.object(
+            tools, "print_status"
+        ), patch.object(
+            tools, "print_skill_state"
+        ):
             output = tools.run_tool_call(block, "logs/test.jsonl")
 
         self.assertEqual(output, "<skill name=\"planner\">\nbody\n</skill>")
@@ -66,6 +74,27 @@ class TodoToolTests(unittest.TestCase):
                 for event, payload, _ in logged_events
             )
         )
+
+    def test_run_tool_call_prefers_resolved_args_over_raw_block_arguments(self):
+        block = SimpleNamespace(
+            type="function_call",
+            name="read_file",
+            arguments='{"path":"old.txt"}',
+            call_id="resolved-args-1",
+        )
+
+        with patch.object(tools, "print_status"), patch.dict(
+            tools.TOOL_HANDLERS,
+            {"read_file": lambda path, limit=None: f"read {path}"},
+            clear=False,
+        ):
+            output = tools.run_tool_call(
+                block,
+                None,
+                resolved_args={"path": "README.md"},
+            )
+
+        self.assertEqual(output, "read README.md")
 
     def test_run_tool_call_persists_large_output(self):
         block = SimpleNamespace(
@@ -149,7 +178,9 @@ class TodoToolTests(unittest.TestCase):
     def test_maybe_add_todo_reminder_injects_message_and_resets_counter(self):
         conversation = [{"role": "user", "content": "finish task"}]
 
-        with patch.object(tools, "append_session_log") as log_event, patch.object(tools, "print_status") as show_status:
+        with patch.object(tools, "append_session_log") as log_event, patch.object(
+            tools, "print_status"
+        ) as show_status:
             rounds = tools.maybe_add_todo_reminder(
                 conversation,
                 rounds_since_todo=2,
@@ -171,7 +202,9 @@ class TodoToolTests(unittest.TestCase):
     def test_maybe_add_todo_reminder_skips_injection_when_todo_was_used(self):
         conversation = [{"role": "user", "content": "finish task"}]
 
-        with patch.object(tools, "append_session_log") as log_event, patch.object(tools, "print_status") as show_status:
+        with patch.object(tools, "append_session_log") as log_event, patch.object(
+            tools, "print_status"
+        ) as show_status:
             rounds = tools.maybe_add_todo_reminder(
                 conversation,
                 rounds_since_todo=2,
@@ -230,38 +263,23 @@ class TodoToolTests(unittest.TestCase):
         self.assertEqual(written["content"], "prefix new suffix")
         self.assertEqual(written["encoding"], "utf-8")
 
-    def test_run_edit_preserves_fallback_encoding_for_legacy_files(self):
+    def test_run_edit_rejects_non_utf8_files(self):
         target = self.tmp_root / "legacy.txt"
-        written = {}
 
         def fake_read_text(path_obj, *args, **kwargs):
             self.assertEqual(path_obj, target)
-            if kwargs.get("encoding") == "utf-8":
-                raise UnicodeDecodeError("utf-8", b"\x80", 0, 1, "bad start byte")
-            self.assertEqual(kwargs.get("encoding"), "gbk")
-            return "legacy old text"
-
-        def fake_write_text(path_obj, content, *args, **kwargs):
-            written["path"] = path_obj
-            written["content"] = content
-            written["encoding"] = kwargs.get("encoding")
-            return len(content)
+            self.assertEqual(kwargs.get("encoding"), "utf-8")
+            raise UnicodeDecodeError("utf-8", b"\x80", 0, 1, "bad start byte")
 
         with patch.object(tools, "safe_path", return_value=target), patch(
             "pathlib.Path.read_text",
             autospec=True,
             side_effect=fake_read_text,
-        ), patch(
-            "pathlib.Path.write_text",
-            autospec=True,
-            side_effect=fake_write_text,
         ):
             result = tools.run_edit("legacy.txt", "old", "new")
 
-        self.assertEqual(result, "Edited legacy.txt")
-        self.assertEqual(written["path"], target)
-        self.assertEqual(written["content"], "legacy new text")
-        self.assertEqual(written["encoding"], "gbk")
+        self.assertIn("Error:", result)
+        self.assertIn("utf-8", result)
 
     def test_run_tool_call_returns_error_for_invalid_json_arguments(self):
         block = SimpleNamespace(

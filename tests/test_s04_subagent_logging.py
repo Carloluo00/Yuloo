@@ -283,6 +283,80 @@ class SubagentLoggingTests(unittest.TestCase):
         denied_result = next(item for item in second_turn_input if item.get("type") == "function_call_output")
         self.assertEqual(denied_result["output"], "Permission denied by user for bash")
 
+    def test_subagent_hook_updates_args_before_permission_and_execution(self):
+        client = FakeClient(
+            [
+                make_response(
+                    [
+                        make_block(
+                            "function_call",
+                            name="read_file",
+                            arguments='{"path":"old.txt"}',
+                            call_id="sub-call-hooked",
+                        )
+                    ]
+                ),
+                make_response(
+                    [
+                        make_block(
+                            "message",
+                            content=[SimpleNamespace(type="output_text", text="hooked summary")],
+                        )
+                    ],
+                    output_text="hooked summary",
+                ),
+            ]
+        )
+        checked = []
+
+        class FakePerms:
+            def check(self, tool_name, tool_args):
+                checked.append((tool_name, dict(tool_args)))
+                return {"behavior": "allow", "reason": "safe"}
+
+            def ask_user(self, tool_name, tool_args):
+                raise AssertionError("ask_user should not run")
+
+        class FakeHooks:
+            def run_hooks(self, event, context=None):
+                if event == "PreToolUse":
+                    return {
+                        "blocked": False,
+                        "block_reason": None,
+                        "updated_tool_args": {"path": "README.md"},
+                        "messages": [],
+                        "permission_override": None,
+                    }
+                return {
+                    "blocked": False,
+                    "block_reason": None,
+                    "updated_tool_args": None,
+                    "messages": [],
+                    "permission_override": None,
+                }
+
+        with patch.object(tools, "client", client), patch.object(tools, "append_session_log"), patch.object(
+            tools, "print_status"
+        ), patch.dict(
+            tools.TOOL_HANDLERS,
+            {"read_file": lambda path, limit=None: f"read {path}"},
+            clear=False,
+        ):
+            summary = tools.run_subagent(
+                "inspect safely",
+                log_path="logs/test.jsonl",
+                parent_call_id="parent-call-hook",
+                description="inspect docs",
+                perms=FakePerms(),
+                hooks=FakeHooks(),
+            )
+
+        self.assertEqual(summary, "hooked summary")
+        self.assertEqual(checked, [("read_file", {"path": "README.md"})])
+        second_turn_input = client.responses.calls[1]["input"]
+        tool_output = next(item for item in second_turn_input if item.get("type") == "function_call_output")
+        self.assertEqual(tool_output["output"], "read README.md")
+
     def test_subagent_turn_survives_invalid_tool_arguments(self):
         client = FakeClient(
             [

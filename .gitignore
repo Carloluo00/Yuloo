@@ -31,7 +31,7 @@ logs/
 
 # Other
 .openclaude-profile.json
-workspaceforagent/
+YULOO_WORKSPACE/
 AGENTS.md
 tests/.pytest_cache/
 tests/pytest-cache-files-*/
