@@ -23,7 +23,7 @@ from config import (
     build_client,
     build_subagent_system,
 )
-from hook import default_hook_result, merge_permission_override
+from hook import HookContext, HookEventName, HookResult, merge_permission_override
 from utils import safe_path, extract_response_text, _read_text_with_fallback
 from log import append_session_log, event_to_dict
 from terminal import print_skill_state, print_status, print_todo_state
@@ -366,22 +366,22 @@ def execute_tool_call_with_policy(
             "permission_decision": None,
         }
 
-    pre_hook = default_hook_result()
+    pre_hook = HookResult()
     if hooks is not None:
         pre_hook = hooks.run_hooks(
-            "PreToolUse",
-            {"tool_name": block.name, "tool_args": args},
+            HookEventName.PRE_TOOL_USE,
+            HookContext(tool_name=block.name, tool_args=args),
         )
-        if pre_hook["updated_tool_args"] is not None:
-            args = pre_hook["updated_tool_args"]
+        if pre_hook.updated_tool_args is not None:
+            args = pre_hook.updated_tool_args
 
-    if pre_hook["blocked"]:
-        output = f"Blocked by hook: {pre_hook['block_reason']}"
-        print_status(f"Blocked {block.name}: {pre_hook['block_reason']}", "33")
+    if pre_hook.blocked:
+        output = f"Blocked by hook: {pre_hook.block_reason}"
+        print_status(f"Blocked {block.name}: {pre_hook.block_reason}", "33")
         return {
             "output": output,
             "tool_args": args,
-            "hook_messages": list(pre_hook["messages"]),
+            "hook_messages": list(pre_hook.messages),
             "permission_decision": None,
         }
 
@@ -390,7 +390,7 @@ def execute_tool_call_with_policy(
         if perms is not None
         else {"behavior": "allow", "reason": "No permission manager configured"}
     )
-    decision = merge_permission_decision(base_decision, pre_hook["permission_override"])
+    decision = merge_permission_decision(base_decision, pre_hook.permission_override)
     if log_path:
         payload = {
             "tool": block.name,
@@ -431,16 +431,16 @@ def execute_tool_call_with_policy(
             hooks=hooks,
         )
 
-    post_hook = default_hook_result()
+    post_hook = HookResult()
     if hooks is not None and executed:
         post_hook = hooks.run_hooks(
-            "PostToolUse",
-            {"tool_name": block.name, "tool_args": args, "tool_output": output},
+            HookEventName.POST_TOOL_USE,
+            HookContext(tool_name=block.name, tool_args=args, tool_output=output),
         )
     return {
         "output": output,
         "tool_args": args,
-        "hook_messages": list(pre_hook["messages"]) + list(post_hook["messages"]),
+        "hook_messages": list(pre_hook.messages) + list(post_hook.messages),
         "permission_decision": decision,
     }
 

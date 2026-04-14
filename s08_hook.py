@@ -5,7 +5,7 @@ from config import (
     build_client,
     build_s08_system,
 )
-from hook import HookManager
+from hook import HookContext, HookEventName, HookManager
 from log import append_session_log, event_to_dict
 from permission import PermissionManager
 from terminal import print_assistant_reply, print_status
@@ -46,10 +46,13 @@ def agent_loop(
     hooks = hooks or HookManager()
 
     if not getattr(hooks, "session_started", False):
-        session_hook = hooks.run_hooks("SessionStart", {"conversation_size": len(conversation)})
+        session_hook = hooks.run_hooks(
+            HookEventName.SESSION_START,
+            HookContext(conversation_size=len(conversation)),
+        )
         inject_hook_messages(
             conversation,
-            session_hook["messages"],
+            session_hook.messages,
             log_path=log_path,
             source="session_start",
         )

@@ -3,6 +3,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from hook import HookContext, HookEventName, HookResult
 import s08_hook as module
 import tools
 
@@ -53,22 +54,10 @@ class HookRuntimeTests(unittest.TestCase):
                 self.session_start_calls = 0
 
             def run_hooks(self, event, context=None):
-                if event == "SessionStart":
+                if event == HookEventName.SESSION_START:
                     self.session_start_calls += 1
-                    return {
-                        "blocked": False,
-                        "block_reason": None,
-                        "updated_tool_args": None,
-                        "messages": ["Session hook message"],
-                        "permission_override": None,
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                    return HookResult(messages=["Session hook message"])
+                return HookResult()
 
         hooks = FakeHooks()
 
@@ -111,21 +100,9 @@ class HookRuntimeTests(unittest.TestCase):
 
         class FakeHooks:
             def run_hooks(self, event, context=None):
-                if event == "SessionStart":
-                    return {
-                        "blocked": False,
-                        "block_reason": None,
-                        "updated_tool_args": None,
-                        "messages": ["Hook note for the first turn"],
-                        "permission_override": None,
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                if event == HookEventName.SESSION_START:
+                    return HookResult(messages=["Hook note for the first turn"])
+                return HookResult()
 
         with patch.object(module, "client", client), patch.object(module, "print_status"), patch.object(
             module, "print_assistant_reply"
@@ -165,21 +142,9 @@ class HookRuntimeTests(unittest.TestCase):
 
         class FakeHooks:
             def run_hooks(self, event, context=None):
-                if event == "PreToolUse":
-                    return {
-                        "blocked": True,
-                        "block_reason": "blocked by pre-tool hook",
-                        "updated_tool_args": None,
-                        "messages": [],
-                        "permission_override": None,
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                if event == HookEventName.PRE_TOOL_USE:
+                    return HookResult(blocked=True, block_reason="blocked by pre-tool hook")
+                return HookResult()
 
         with patch.object(module, "client", client), patch.object(module, "print_status"), patch.object(
             module, "print_assistant_reply"
@@ -231,21 +196,12 @@ class HookRuntimeTests(unittest.TestCase):
 
         class FakeHooks:
             def run_hooks(self, event, context=None):
-                if event == "PreToolUse":
-                    return {
-                        "blocked": False,
-                        "block_reason": None,
-                        "updated_tool_args": {"path": "README.md"},
-                        "messages": [],
-                        "permission_override": {"behavior": "ask", "reason": "review first"},
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                if event == HookEventName.PRE_TOOL_USE:
+                    return HookResult(
+                        updated_tool_args={"path": "README.md"},
+                        permission_override={"behavior": "ask", "reason": "review first"},
+                    )
+                return HookResult()
 
         with patch.object(module, "client", client), patch.object(module, "print_status"), patch.object(
             module, "print_assistant_reply"
@@ -299,22 +255,10 @@ class HookRuntimeTests(unittest.TestCase):
                 self.post_calls = 0
 
             def run_hooks(self, event, context=None):
-                if event == "PostToolUse":
+                if event == HookEventName.POST_TOOL_USE:
                     self.post_calls += 1
-                    return {
-                        "blocked": False,
-                        "block_reason": None,
-                        "updated_tool_args": None,
-                        "messages": ["post hook should not run"],
-                        "permission_override": None,
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                    return HookResult(messages=["post hook should not run"])
+                return HookResult()
 
         hooks = FakeHooks()
 
@@ -355,21 +299,9 @@ class HookRuntimeTests(unittest.TestCase):
 
         class FakeHooks:
             def run_hooks(self, event, context=None):
-                if event == "PostToolUse":
-                    return {
-                        "blocked": False,
-                        "block_reason": None,
-                        "updated_tool_args": None,
-                        "messages": ["Remember to summarize what you just read."],
-                        "permission_override": None,
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                if event == HookEventName.POST_TOOL_USE:
+                    return HookResult(messages=["Remember to summarize what you just read."])
+                return HookResult()
 
         with patch.object(module, "client", client), patch.object(module, "print_status"), patch.object(
             module, "print_assistant_reply"

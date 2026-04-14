@@ -4,6 +4,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from hook import HookEventName, HookResult
 import tools
 
 
@@ -319,21 +320,9 @@ class SubagentLoggingTests(unittest.TestCase):
 
         class FakeHooks:
             def run_hooks(self, event, context=None):
-                if event == "PreToolUse":
-                    return {
-                        "blocked": False,
-                        "block_reason": None,
-                        "updated_tool_args": {"path": "README.md"},
-                        "messages": [],
-                        "permission_override": None,
-                    }
-                return {
-                    "blocked": False,
-                    "block_reason": None,
-                    "updated_tool_args": None,
-                    "messages": [],
-                    "permission_override": None,
-                }
+                if event == HookEventName.PRE_TOOL_USE:
+                    return HookResult(updated_tool_args={"path": "README.md"})
+                return HookResult()
 
         with patch.object(tools, "client", client), patch.object(tools, "append_session_log"), patch.object(
             tools, "print_status"

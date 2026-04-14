@@ -40,24 +40,33 @@ SessionStart -> PreToolUse hook -> permission -> tool run -> PostToolUse hook
 
 1. 从项目根目录读取 `.hooks.json`
 2. 按事件名和 `matcher` 过滤哪些 hook 生效
-3. 汇总 hook 的结构化结果，交给调用方处理
+3. 返回类型化的 hook 结果，交给调用方处理
 
-它支持三个事件，定义在 [`hook.py`](e:/Project/Yuloo/hook.py#L8)：
+当前相关数据结构有三层：
+
+- `HookEventName`
+  - 表示事件名
+- `HookContext`
+  - 表示事件上下文
+- `HookResult`
+  - 表示 hook 的结构化输出
+
+它支持三个事件，定义在 [`hook.py`](e:/Project/Yuloo/hook.py#L11)：
 
 - `SessionStart`
 - `PreToolUse`
 - `PostToolUse`
 
-`HookManager.run_hooks()` 的返回契约定义在 [`hook.py`](e:/Project/Yuloo/hook.py#L70)：
+`HookManager.run_hooks()` 现在返回 `HookResult`，定义在 [`hook.py`](e:/Project/Yuloo/hook.py#L24)：
 
 ```python
-{
-    "blocked": False,
-    "block_reason": None,
-    "updated_tool_args": None,
-    "messages": [],
-    "permission_override": None,
-}
+HookResult(
+    blocked=False,
+    block_reason=None,
+    updated_tool_args=None,
+    messages=[],
+    permission_override=None,
+)
 ```
 
 这说明 hook 的输出是“建议”或“决策结果”，而不是副作用。
@@ -226,7 +235,7 @@ trust marker 定义在 [`config.py`](e:/Project/Yuloo/config.py#L11)：
 TRUST_MARKER = WORKDIR / ".YULOO" / ".YULOO_trusted"
 ```
 
-`HookManager` 会在 [`hook.py`](e:/Project/Yuloo/hook.py#L58) 检查它：
+`HookManager` 会在 [`hook.py`](e:/Project/Yuloo/hook.py#L59) 检查它：
 
 - trusted: hook 正常运行
 - 非 trusted: `run_hooks()` 直接返回空结果，不报错、不生效
@@ -297,14 +306,14 @@ TRUST_MARKER = WORKDIR / ".YULOO" / ".YULOO_trusted"
 
 - 创建 `PermissionManager`
 - 创建 `HookManager`
-- 运行 `SessionStart`
-- 把 hook 返回的 `messages` 注入 conversation
+- 运行 `HookEventName.SESSION_START`
+- 把 `HookResult.messages` 注入 conversation
 
 对应代码：
 
 - 创建对象: [`s08_hook.py`](e:/Project/Yuloo/s08_hook.py#L45)
 - 运行 `SessionStart`: [`s08_hook.py`](e:/Project/Yuloo/s08_hook.py#L48)
-- 注入消息: [`s08_hook.py`](e:/Project/Yuloo/s08_hook.py#L49)
+- 注入消息: [`s08_hook.py`](e:/Project/Yuloo/s08_hook.py#L52)
 
 这里的消息注入不是 system prompt 修改，而是往会话里追加一条合成的 `user` 消息，具体实现见 [`tools.py`](e:/Project/Yuloo/tools.py#L317)。
 

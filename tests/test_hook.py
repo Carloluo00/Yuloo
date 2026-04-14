@@ -3,7 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 
-from hook import HookManager
+from hook import HookContext, HookEventName, HookManager, HookResult
 
 
 class HookManagerTests(unittest.TestCase):
@@ -38,15 +38,16 @@ class HookManagerTests(unittest.TestCase):
         manager = HookManager(config_path=self.config_path, sdk_mode=True)
 
         result = manager.run_hooks(
-            "PreToolUse",
-            {"tool_name": "read_file", "tool_args": {"path": "old.txt"}},
+            HookEventName.PRE_TOOL_USE,
+            HookContext(tool_name="read_file", tool_args={"path": "old.txt"}),
         )
 
-        self.assertFalse(result["blocked"])
-        self.assertEqual(result["updated_tool_args"], {"path": "README.md"})
-        self.assertEqual(result["messages"], ["Summarize the README after reading it."])
+        self.assertIsInstance(result, HookResult)
+        self.assertFalse(result.blocked)
+        self.assertEqual(result.updated_tool_args, {"path": "README.md"})
+        self.assertEqual(result.messages, ["Summarize the README after reading it."])
         self.assertEqual(
-            result["permission_override"],
+            result.permission_override,
             {"behavior": "ask", "reason": "needs review"},
         )
 
@@ -67,12 +68,12 @@ class HookManagerTests(unittest.TestCase):
         manager = HookManager(config_path=self.config_path, sdk_mode=True)
 
         result = manager.run_hooks(
-            "PreToolUse",
-            {"tool_name": "bash", "tool_args": {"command": "dir"}},
+            HookEventName.PRE_TOOL_USE,
+            HookContext(tool_name="bash", tool_args={"command": "dir"}),
         )
 
-        self.assertTrue(result["blocked"])
-        self.assertEqual(result["block_reason"], "bash is disabled in this workspace")
-        self.assertIsNone(result["updated_tool_args"])
-        self.assertEqual(result["messages"], [])
-        self.assertIsNone(result["permission_override"])
+        self.assertTrue(result.blocked)
+        self.assertEqual(result.block_reason, "bash is disabled in this workspace")
+        self.assertIsNone(result.updated_tool_args)
+        self.assertEqual(result.messages, [])
+        self.assertIsNone(result.permission_override)
